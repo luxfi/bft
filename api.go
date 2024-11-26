@@ -67,20 +67,3 @@ type Block interface {
 	// Bytes returns a byte encoding of the block
 	Bytes() []byte
 }
-
-type Metadata struct {
-	// Version defines the version of the protocol this block was created with.
-	Version uint32
-	// Digest returns a collision resistant short representation of the block's bytes
-	Digest []byte
-	// Epoch returns the epoch in which the block was proposed
-	Epoch uint64
-	// Round returns the round number in which the block was proposed.
-	// Can also be an empty block.
-	Round uint64
-	// Seq is the order of the block among all blocks in the blockchain.
-	// Cannot correspond to an empty block.
-	Seq uint64
-	// Prev returns the digest of the previous data block
-	Prev []byte
-}
