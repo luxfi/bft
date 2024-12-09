@@ -1,0 +1,104 @@
+// Copyright (C) 2019-2024, Ava Labs, Inc. All rights reserved.
+// See the file LICENSE for licensing terms.
+
+package wal
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"simplex/record"
+)
+
+const (
+	WalExtension   = ".wal"
+	WalFilename    = "temp"
+	WalFlags       = os.O_APPEND | os.O_CREATE | os.O_RDWR
+	WalPermissions = 0666
+)
+
+type WriteAheadLog struct {
+	file *os.File
+}
+
+// New opens a write ahead log file, creating one if necessary.
+// Call Close() on the WriteAheadLog to ensure the file is closed after use.
+func New() (*WriteAheadLog, error) {
+	filename := WalFilename + WalExtension
+	file, err := os.OpenFile(filename, WalFlags, WalPermissions)
+	if err != nil {
+		return nil, err
+	}
+
+	return &WriteAheadLog{
+		file: file,
+	}, nil
+}
+
+// Appends a record to the write ahead log
+// Must flush the OS cache on every append to ensure consistency
+func (w *WriteAheadLog) Append(r *record.Record) error {
+	bytes := r.Bytes()
+
+	// write will append
+	_, err := w.file.Write(bytes)
+	if err != nil {
+		return err
+	}
+
+	// ensure file gets written to persistent storage
+	return w.file.Sync()
+}
+
+func (w *WriteAheadLog) ReadAll() ([]record.Record, error) {
+	_, err := w.file.Seek(0, io.SeekStart)
+	if err != nil {
+		return []record.Record{}, fmt.Errorf("error seeking to start %w", err)
+	}
+
+	records := []record.Record{}
+	fileInfo, err := w.file.Stat()
+	if err != nil {
+		return []record.Record{}, fmt.Errorf("error getting file info %w", err)
+	}
+	bytesToRead := fileInfo.Size()
+
+	for bytesToRead > 0 {
+		var record record.Record
+		bytesRead, err := record.FromBytes(w.file)
+		// record was corrupted in wal
+		if err != nil {
+			w.truncateAt(fileInfo.Size() - bytesToRead)
+			return records, nil
+		}
+
+		bytesToRead -= int64(bytesRead)
+		records = append(records, record)
+	}
+
+	// should never happen
+	if bytesToRead != 0 {
+		return records, fmt.Errorf("read more bytes than expected")
+	}
+
+	return records, nil
+}
+
+// Truncate truncates the write ahead log
+func (w *WriteAheadLog) Truncate() error {
+	return w.truncateAt(0)
+}
+
+func (w *WriteAheadLog) truncateAt(offset int64) error {
+	// truncate call is atomic. Ref https://cgi.cse.unsw.edu.au/~cs3231/18s1/os161/man/syscall/ftruncate.html
+	err := w.file.Truncate(offset)
+	if err != nil {
+		return err
+	}
+
+	return w.file.Sync()
+}
+
+func (w *WriteAheadLog) Close() error {
+	return w.file.Close()
+}

@@ -5,7 +5,7 @@ package simplex
 
 import (
 	"context"
-	"sniplex/record"
+	"simplex/record"
 
 	"go.uber.org/zap"
 )

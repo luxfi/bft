@@ -1,10 +1,10 @@
 // Copyright (C) 2019-2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package wal
 
 import (
-	"sniplex/record"
+	"simplex/record"
 	"testing"
 
 	"github.com/stretchr/testify/require"

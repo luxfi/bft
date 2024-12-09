@@ -1,12 +1,13 @@
 // Copyright (C) 2019-2024, Ava Labs, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package wal
 
 import (
 	"bytes"
 	"fmt"
-	"sniplex/record"
+
+	"simplex/record"
 )
 
 type InMemWAL bytes.Buffer
