@@ -37,11 +37,17 @@ type BlockBuilder interface {
 	// BuildBlock blocks until some transactions are available to be batched into a block,
 	// in which case a block and true are returned.
 	// When the given context is cancelled by the caller, returns false.
-	BuildBlock(ctx context.Context) (Block, bool)
+	BuildBlock(ctx context.Context, metadata ProtocolMetadata) (Block, bool)
 
 	// IncomingBlock returns when either the given context is cancelled,
 	// or when the application signals that a block should be built.
 	IncomingBlock(ctx context.Context)
+}
+
+type Storage interface {
+	Height() uint64
+	Retrieve(seq uint64) (Block, FinalizationCertificate, bool)
+	Index(block Block, certificate FinalizationCertificate)
 }
 
 type Communication interface {
@@ -52,8 +58,17 @@ type Communication interface {
 	// SendMessage sends a message to the given destination node
 	SendMessage(msg *Message, destination NodeID)
 
-	// Broadcast broadcasts the given message to all nodes
+	// Broadcast broadcasts the given message to all nodes.
+	// Does not send it to yourself.
 	Broadcast(msg *Message)
+}
+
+type Signer interface {
+	Sign(message []byte) ([]byte, error)
+}
+
+type SignatureVerifier interface {
+	Verify(message []byte, signature []byte, signer NodeID) error
 }
 
 type WriteAheadLog interface {
@@ -62,9 +77,41 @@ type WriteAheadLog interface {
 }
 
 type Block interface {
-	// Metadata is the consensus specific metadata for the block
-	Metadata() Metadata
+	// BlockHeader encodes a succinct and collision-free representation of a block.
+	BlockHeader() BlockHeader
 
 	// Bytes returns a byte encoding of the block
 	Bytes() []byte
+
+	// Verify verifies the block by speculatively executing it on top of its ancestor.
+	Verify() error
+}
+
+// BlockDeserializer deserializes blocks according to formatting
+// enforced by the application.
+type BlockDeserializer interface {
+	// DeserializeBlock parses the given bytes and initializes a Block.
+	// Returns an error upon failure.
+	DeserializeBlock(bytes []byte) (Block, error)
+}
+
+// Signature encodes a signature and the node that signed it, without the message it was signed on.
+type Signature struct {
+	// Signer is the NodeID of the creator of the signature.
+	Signer NodeID
+	// Value is the byte representation of the signature.
+	Value []byte
+}
+
+// QCDeserializer deserializes QuorumCertificates according to formatting
+type QCDeserializer interface {
+	// DeserializeQuorumCertificate parses the given bytes and initializes a QuorumCertificate.
+	// Returns an error upon failure.
+	DeserializeQuorumCertificate(bytes []byte) (QuorumCertificate, error)
+}
+
+// SignatureAggregator aggregates signatures into a QuorumCertificate
+type SignatureAggregator interface {
+	// Aggregate aggregates several signatures into a QuorumCertificate
+	Aggregate([]Signature) (QuorumCertificate, error)
 }

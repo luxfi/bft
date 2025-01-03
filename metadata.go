@@ -4,6 +4,7 @@
 package simplex
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 )
@@ -19,11 +20,14 @@ const (
 	metadataLen = metadataVersionLen + metadataDigestLen + metadataEpochLen + metadataRoundLen + metadataSeqLen + metadataPrevLen
 )
 
-type Metadata struct {
+const (
+	digestFormatSize = 10
+)
+
+// ProtocolMetadata encodes information about the protocol state at a given point in time.
+type ProtocolMetadata struct {
 	// Version defines the version of the protocol this block was created with.
 	Version uint8
-	// Digest returns a collision resistant short representation of the block's bytes
-	Digest []byte
 	// Epoch returns the epoch in which the block was proposed
 	Epoch uint64
 	// Round returns the round number in which the block was proposed.
@@ -33,71 +37,88 @@ type Metadata struct {
 	// Cannot correspond to an empty block.
 	Seq uint64
 	// Prev returns the digest of the previous data block
-	Prev []byte
+	Prev Digest
 }
 
-func (m *Metadata) Bytes() []byte {
+// BlockHeader encodes a succinct and collision-free representation of a block.
+// It's included in votes and finalizations in order to convey which block is voted on,
+// or which block is finalized.
+type BlockHeader struct {
+	ProtocolMetadata
+	// Digest returns a collision resistant short representation of the block's bytes
+	Digest Digest
+}
+
+type Digest [metadataDigestLen]byte
+
+func (d Digest) String() string {
+	return fmt.Sprintf("%x...", (d)[:digestFormatSize])
+}
+
+func (bh *BlockHeader) Equals(other *BlockHeader) bool {
+	return bytes.Equal(bh.Digest[:], other.Digest[:]) &&
+		bytes.Equal(bh.Prev[:], other.Prev[:]) && bh.Epoch == other.Epoch &&
+		bh.Round == other.Round && bh.Seq == other.Seq && bh.Version == other.Version
+}
+
+func (bh *BlockHeader) Bytes() []byte {
 	// Sanity check: check that digest and prev are 32 bytes
 
-	if len(m.Digest) != metadataDigestLen {
-		panic(fmt.Sprintf("digest is %d bytes, expected %d", len(m.Digest), metadataDigestLen))
+	if len(bh.Digest) != metadataDigestLen {
+		panic(fmt.Sprintf("digest is %d bytes, expected %d", len(bh.Digest), metadataDigestLen))
 	}
 
 	// Prev block's digest can be nil, or 32 bytes
-	if len(m.Prev) != 0 && len(m.Prev) != metadataPrevLen {
-		panic(fmt.Sprintf("digest is %d bytes, expected %d", len(m.Prev), metadataPrevLen))
-	}
-
-	if len(m.Prev) == 0 {
-		m.Prev = make([]byte, metadataPrevLen)
+	if len(bh.Prev) != 0 && len(bh.Prev) != metadataPrevLen {
+		panic(fmt.Sprintf("digest is %d bytes, expected %d", len(bh.Prev), metadataPrevLen))
 	}
 
 	buff := make([]byte, metadataLen)
 	var pos int
 
-	buff[pos] = m.Version
+	buff[pos] = bh.Version
 	pos++
 
-	copy(buff[pos:], m.Digest)
+	copy(buff[pos:], bh.Digest[:])
 	pos += metadataDigestLen
 
-	binary.BigEndian.PutUint64(buff[pos:], m.Epoch)
+	binary.BigEndian.PutUint64(buff[pos:], bh.Epoch)
 	pos += metadataEpochLen
 
-	binary.BigEndian.PutUint64(buff[pos:], m.Round)
+	binary.BigEndian.PutUint64(buff[pos:], bh.Round)
 	pos += metadataRoundLen
 
-	binary.BigEndian.PutUint64(buff[pos:], m.Seq)
+	binary.BigEndian.PutUint64(buff[pos:], bh.Seq)
 	pos += metadataSeqLen
 
-	copy(buff[pos:], m.Prev)
+	copy(buff[pos:], bh.Prev[:])
 
 	return buff
 }
 
-func (m *Metadata) FromBytes(buff []byte) error {
+func (bh *BlockHeader) FromBytes(buff []byte) error {
 	if len(buff) != metadataLen {
 		return fmt.Errorf("invalid buffer length %d, expected %d", len(buff), metadataLen)
 	}
 
 	var pos int
 
-	m.Version = buff[pos]
+	bh.Version = buff[pos]
 	pos++
 
-	m.Digest = buff[pos : pos+metadataDigestLen]
+	copy(bh.Digest[:], buff[pos:pos+metadataDigestLen])
 	pos += metadataDigestLen
 
-	m.Epoch = binary.BigEndian.Uint64(buff[pos:])
+	bh.Epoch = binary.BigEndian.Uint64(buff[pos:])
 	pos += metadataEpochLen
 
-	m.Round = binary.BigEndian.Uint64(buff[pos:])
+	bh.Round = binary.BigEndian.Uint64(buff[pos:])
 	pos += metadataRoundLen
 
-	m.Seq = binary.BigEndian.Uint64(buff[pos:])
+	bh.Seq = binary.BigEndian.Uint64(buff[pos:])
 	pos += metadataSeqLen
 
-	m.Prev = buff[pos : pos+metadataPrevLen]
+	copy(bh.Prev[:], buff[pos:pos+metadataPrevLen])
 
 	return nil
 }

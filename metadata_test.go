@@ -11,27 +11,29 @@ import (
 )
 
 func TestMetadata(t *testing.T) {
-	prev := make([]byte, metadataPrevLen)
-	digest := make([]byte, metadataDigestLen)
+	var prev [metadataPrevLen]byte
+	var digest [metadataDigestLen]byte
 
-	_, err := rand.Read(prev)
+	_, err := rand.Read(prev[:])
 	require.NoError(t, err)
 
-	_, err = rand.Read(digest)
+	_, err = rand.Read(digest[:])
 	require.NoError(t, err)
 
-	md := Metadata{
-		Version: 1,
-		Round:   2,
-		Seq:     3,
-		Epoch:   4,
-		Prev:    prev,
-		Digest:  digest,
+	bh := BlockHeader{
+		ProtocolMetadata: ProtocolMetadata{
+			Version: 1,
+			Round:   2,
+			Seq:     3,
+			Epoch:   4,
+			Prev:    prev,
+		},
+		Digest: digest,
 	}
 
-	var md2 Metadata
-	require.NoError(t, md2.FromBytes(md.Bytes()))
-	require.Equal(t, md, md2)
+	var bh2 BlockHeader
+	require.NoError(t, bh2.FromBytes(bh.Bytes()))
+	require.Equal(t, bh, bh2)
 }
 
 func FuzzMetadata(f *testing.F) {
@@ -40,17 +42,19 @@ func FuzzMetadata(f *testing.F) {
 		prev := sha256.Sum256(prevPreimage)
 		digest := sha256.Sum256(digestPreimage)
 
-		md := Metadata{
-			Version: version,
-			Round:   round,
-			Seq:     seq,
-			Epoch:   epoch,
-			Prev:    prev[:],
-			Digest:  digest[:],
+		bh := BlockHeader{
+			ProtocolMetadata: ProtocolMetadata{
+				Version: version,
+				Round:   round,
+				Seq:     seq,
+				Epoch:   epoch,
+				Prev:    prev,
+			},
+			Digest: digest,
 		}
 
-		var md2 Metadata
-		require.NoError(t, md2.FromBytes(md.Bytes()))
-		require.Equal(t, md, md2)
+		var bh2 BlockHeader
+		require.NoError(t, bh2.FromBytes(bh.Bytes()))
+		require.Equal(t, bh, bh2)
 	})
 }

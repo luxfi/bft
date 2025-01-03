@@ -3,12 +3,17 @@
 
 package simplex
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/hex"
+)
 
 type NodeID []byte
+
+func (node NodeID) String() string {
+	return hex.EncodeToString(node)
+}
 
 func (node NodeID) Equals(otherNode NodeID) bool {
 	return bytes.Equal(node, otherNode)
 }
-
-type Bytes []byte
