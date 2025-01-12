@@ -461,7 +461,7 @@ func (e *Epoch) maybeCollectNotarization() error {
 	return e.assembleNotarization(votesForCurrentRound, digestWeExpect)
 }
 
-func (e *Epoch) assembleNotarization(votesForCurrentRound map[string]*Vote, digest [metadataDigestLen]byte) error {
+func (e *Epoch) assembleNotarization(votesForCurrentRound map[string]*Vote, digest Digest) error {
 	vote := ToBeSignedVote{
 		BlockHeader{
 			ProtocolMetadata: ProtocolMetadata{
@@ -697,7 +697,7 @@ func (e *Epoch) verifyProposalIsPartOfOurChain(block Block) bool {
 	}
 
 	var expectedSeq uint64
-	var expectedPrevDigest [metadataDigestLen]byte
+	var expectedPrevDigest Digest
 
 	// Else, either it's not the first block, or we haven't committed the first block, and it is the first block.
 	// If it's the latter we have nothing else to do.
@@ -831,7 +831,7 @@ func (e *Epoch) proposeBlock() error {
 }
 
 func (e *Epoch) Metadata() ProtocolMetadata {
-	var prev [metadataDigestLen]byte
+	var prev Digest
 	seq := e.Storage.Height()
 	if e.lastBlock != nil {
 		// Build on top of the latest block
