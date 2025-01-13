@@ -117,7 +117,7 @@ func (t *testInstance) assertNotarization(round uint64) {
 
 		for _, rawRecord := range rawRecords {
 			if binary.BigEndian.Uint16(rawRecord[:2]) == record.NotarizationRecordType {
-				_, vote, err := NotarizationFromRecord(rawRecord)
+				_, vote, err := ParseNotarizationRecord(rawRecord)
 				require.NoError(t.t, err)
 
 				if vote.Round == round {

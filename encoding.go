@@ -16,7 +16,25 @@ type QuorumRecord struct {
 	Vote []byte
 }
 
-func finalizationFromRecord(payload []byte) ([]byte, ToBeSignedFinalization, error) {
+func FinalizationCertificateFromRecord(record []byte, qd QCDeserializer) (FinalizationCertificate, error) {
+	qcBytes, finalization, err := parseFinalizationRecord(record)
+	if err != nil {
+		return FinalizationCertificate{}, err
+	}
+
+	qc, err := qd.DeserializeQuorumCertificate(qcBytes)
+	if err != nil {
+		return FinalizationCertificate{}, err
+	}
+
+	return FinalizationCertificate{
+		Finalization: finalization,
+		QC:           qc,
+	}, nil
+}
+
+func parseFinalizationRecord(payload []byte) ([]byte, ToBeSignedFinalization, error) {
+	payload = payload[2:]
 	var nr QuorumRecord
 	_, err := asn1.Unmarshal(payload, &nr)
 	if err != nil {
@@ -31,7 +49,7 @@ func finalizationFromRecord(payload []byte) ([]byte, ToBeSignedFinalization, err
 	return nr.QC, finalization, nil
 }
 
-func quorumRecord(qc []byte, rawVote []byte, recordType uint16) []byte {
+func NewQuorumRecord(qc []byte, rawVote []byte, recordType uint16) []byte {
 	var qr QuorumRecord
 	qr.QC = qc
 	qr.Vote = rawVote
@@ -48,8 +66,14 @@ func quorumRecord(qc []byte, rawVote []byte, recordType uint16) []byte {
 	return buff
 }
 
-func NotarizationFromRecord(record []byte) ([]byte, ToBeSignedVote, error) {
-	record = record[2:]
+// ParseNotarizationRecordBytes parses a notarization record into the bytes of the QC and the vote
+func ParseNotarizationRecord(r []byte) ([]byte, ToBeSignedVote, error) {
+	recordType := binary.BigEndian.Uint16(r)
+	if recordType != record.NotarizationRecordType {
+		return nil, ToBeSignedVote{}, fmt.Errorf("expected record type %d, got %d", record.NotarizationRecordType, recordType)
+	}
+
+	record := r[2:]
 	var nr QuorumRecord
 	_, err := asn1.Unmarshal(record, &nr)
 	if err != nil {
@@ -64,7 +88,24 @@ func NotarizationFromRecord(record []byte) ([]byte, ToBeSignedVote, error) {
 	return nr.QC, vote, nil
 }
 
-func blockRecord(bh BlockHeader, blockData []byte) []byte {
+func NotarizationFromRecord(record []byte, qd QCDeserializer) (Notarization, error) {
+	qcBytes, vote, err := ParseNotarizationRecord(record)
+	if err != nil {
+		return Notarization{}, err
+	}
+
+	qc, err := qd.DeserializeQuorumCertificate(qcBytes)
+	if err != nil {
+		return Notarization{}, err
+	}
+
+	return Notarization{
+		Vote: vote,
+		QC:   qc,
+	}, nil
+}
+
+func BlockRecord(bh BlockHeader, blockData []byte) []byte {
 	mdBytes := bh.Bytes()
 
 	mdSizeBuff := make([]byte, 4)
@@ -83,7 +124,21 @@ func blockRecord(bh BlockHeader, blockData []byte) []byte {
 	return buff
 }
 
-func blockFromRecord(buff []byte) (BlockHeader, []byte, error) {
+func BlockFromRecord(blockDeserializer BlockDeserializer, record []byte) (Block, error) {
+	_, payload, err := ParseBlockRecord(record)
+	if err != nil {
+		return nil, err
+	}
+
+	return blockDeserializer.DeserializeBlock(payload)
+}
+
+func ParseBlockRecord(buff []byte) (BlockHeader, []byte, error) {
+	recordType := binary.BigEndian.Uint16(buff)
+	if recordType != record.BlockRecordType {
+		return BlockHeader{}, nil, fmt.Errorf("expected record type %d, got %d", record.BlockRecordType, recordType)
+	}
+
 	buff = buff[2:]
 	if len(buff) < 8 {
 		return BlockHeader{}, nil, errors.New("buffer too small, expected 8 bytes")

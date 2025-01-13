@@ -30,7 +30,7 @@ func TestEpochSimpleFlow(t *testing.T) {
 	quorum := Quorum(len(nodes))
 	conf := EpochConfig{
 		Logger:              l,
-		ID:                  NodeID{1},
+		ID:                  nodes[0],
 		Signer:              &testSigner{},
 		WAL:                 &wal.InMemWAL{},
 		Verifier:            &testVerifier{},
@@ -61,7 +61,8 @@ func TestEpochSimpleFlow(t *testing.T) {
 
 		if !isEpochNode {
 			// send node a message from the leader
-			vote := newVote(block, leader)
+			vote, err := newVote(block, leader, conf.Signer)
+			require.NoError(t, err)
 			e.HandleMessage(&Message{
 				BlockMessage: &BlockMessage{
 					Vote:  *vote,
@@ -72,7 +73,7 @@ func TestEpochSimpleFlow(t *testing.T) {
 
 		// start at one since our node has already voted
 		for i := 1; i < quorum; i++ {
-			injectVote(t, e, block, nodes[i])
+			injectVote(t, e, block, nodes[i], conf.Signer)
 		}
 
 		for i := 1; i < quorum; i++ {
@@ -89,41 +90,51 @@ func makeLogger(t *testing.T, node int) *testLogger {
 	require.NoError(t, err)
 
 	logger = logger.With(zap.Int("node", node))
-
 	l := &testLogger{Logger: logger}
 	return l
 }
 
-func newVote(block *testBlock, id NodeID) *Vote {
+func newVote(block *testBlock, id NodeID, signer Signer) (*Vote, error) {
+	vote := ToBeSignedVote{
+		BlockHeader: block.BlockHeader(),
+	}
+	sig, err := vote.Sign(signer)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Vote{
 		Signature: Signature{
 			Signer: id,
+			Value:  sig,
 		},
-		Vote: ToBeSignedVote{
+		Vote: vote,
+	}, nil
+}
+
+func injectVote(t *testing.T, e *Epoch, block *testBlock, id NodeID, signer Signer) {
+	vote, err := newVote(block, id, signer)
+	require.NoError(t, err)
+	err = e.HandleMessage(&Message{
+		VoteMessage: vote,
+	}, id)
+	require.NoError(t, err)
+}
+
+func newFinalization(block *testBlock, id NodeID) *Finalization {
+	return &Finalization{
+		Signature: Signature{
+			Signer: id,
+		},
+		Finalization: ToBeSignedFinalization{
 			BlockHeader: block.BlockHeader(),
 		},
 	}
 }
 
-func injectVote(t *testing.T, e *Epoch, block *testBlock, id NodeID) {
-	err := e.HandleMessage(&Message{
-		VoteMessage: newVote(block, id),
-	}, id)
-
-	require.NoError(t, err)
-}
-
 func injectFinalization(t *testing.T, e *Epoch, block *testBlock, id NodeID) {
-	md := block.BlockHeader()
 	err := e.HandleMessage(&Message{
-		Finalization: &Finalization{
-			Signature: Signature{
-				Signer: id,
-			},
-			Finalization: ToBeSignedFinalization{
-				BlockHeader: md,
-			},
-		},
+		Finalization: newFinalization(block, id),
 	}, id)
 	require.NoError(t, err)
 }
@@ -216,6 +227,7 @@ func (n noopComm) Broadcast(msg *Message) {
 
 type testBlockBuilder chan *testBlock
 
+// BuildBlock builds a new testblock and sends it to the BlockBuilder channel
 func (t testBlockBuilder) BuildBlock(_ context.Context, metadata ProtocolMetadata) (Block, bool) {
 	tb := newTestBlock(metadata)
 
