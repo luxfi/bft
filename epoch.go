@@ -115,7 +115,6 @@ func (e *Epoch) HandleMessage(msg *Message, from NodeID) error {
 		return nil
 	}
 
-
 	switch {
 	case msg.BlockMessage != nil:
 		return e.handleBlockMessage(msg.BlockMessage, from)
@@ -156,13 +155,7 @@ func (e *Epoch) init() error {
 	if err != nil {
 		return err
 	}
-	err = e.setMetadataFromStorage()
-	if err != nil {
-		return err
-	}
-
-	e.loadLastRound()
-	return nil
+	return e.setMetadataFromStorage()
 }
 
 func (e *Epoch) Start() error {
@@ -182,6 +175,7 @@ func (e *Epoch) syncBlockRecord(r []byte) error {
 	if !b {
 		return fmt.Errorf("failed to store block from WAL")
 	}
+
 	e.Logger.Info("Block Proposal Recovered From WAL", zap.Uint64("Round", block.BlockHeader().Round), zap.Bool("stored", b))
 	return nil
 }
@@ -191,7 +185,7 @@ func (e *Epoch) syncNotarizationRecord(r []byte) error {
 	if err != nil {
 		return err
 	}
-
+	e.Logger.Info("Notarization Recovered From WAL", zap.Uint64("Round", notarization.Vote.Round))
 	return e.storeNotarization(notarization)
 }
 
@@ -204,6 +198,7 @@ func (e *Epoch) syncFinalizationRecord(r []byte) error {
 	if !ok {
 		return fmt.Errorf("round not found for finalization certificate")
 	}
+	e.Logger.Info("Finalization Certificate Recovered From WAL", zap.Uint64("Round", fCert.Finalization.Round))
 	round.fCert = &fCert
 	return nil
 }
@@ -259,10 +254,14 @@ func (e *Epoch) resumeFromWal(records [][]byte) error {
 		if err != nil {
 			return err
 		}
-		err = e.persistFinalizationCertificate(fCert)
-		if err != nil {
-			return err
-		}
+
+		finalizationCertificate := &Message{FinalizationCertificate: &fCert}
+		e.Comm.Broadcast(finalizationCertificate)
+
+		e.Logger.Debug("Broadcast finalization certificate",
+			zap.Uint64("round", fCert.Finalization.Round),
+			zap.Stringer("digest", fCert.Finalization.BlockHeader.Digest))
+
 		return e.startRound()
 	default:
 		return errors.New("unknown record type")
@@ -293,8 +292,10 @@ func (e *Epoch) setMetadataFromRecords(records [][]byte) error {
 			if err != nil {
 				return err
 			}
-			e.round = notarization.Vote.Round + 1
-			e.Epoch = notarization.Vote.BlockHeader.Epoch
+			if notarization.Vote.Round >= e.round {
+				e.round = notarization.Vote.Round + 1
+				e.Epoch = notarization.Vote.BlockHeader.Epoch
+			}
 			return nil
 		}
 	}
@@ -344,14 +345,6 @@ func (e *Epoch) loadLastBlock() error {
 
 	e.lastBlock = block
 	return nil
-}
-
-func (e *Epoch) loadLastRound() {
-	// Put the last block we committed in the rounds map.
-	if e.lastBlock != nil {
-		round := NewRound(e.lastBlock)
-		e.rounds[round.num] = round
-	}
 }
 
 func (e *Epoch) Stop() {
