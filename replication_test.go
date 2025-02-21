@@ -172,6 +172,67 @@ func TestReplicationStartsBeforeCurrentRound(t *testing.T) {
 	}
 }
 
+func TestReplicationFutureFinalizationCertificate(t *testing.T) {
+	// send a block, then simultaneously send a finalization certificate for the block
+	l := testutil.MakeLogger(t, 1)
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
+	storage := newInMemStorage()
+
+	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	quorum := simplex.Quorum(len(nodes))
+	signatureAggregator := &testSignatureAggregator{}
+	conf := simplex.EpochConfig{
+		MaxProposalWait:     simplex.DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[1],
+		Signer:              &testSigner{},
+		WAL:                 wal.NewMemWAL(t),
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                noopComm(nodes),
+		BlockBuilder:        bb,
+		SignatureAggregator: signatureAggregator,
+	}
+
+	e, err := simplex.NewEpoch(conf)
+	require.NoError(t, err)
+
+	require.NoError(t, e.Start())
+
+	md := e.Metadata()
+	_, ok := bb.BuildBlock(context.Background(), md)
+	require.True(t, ok)
+	require.Equal(t, md.Round, md.Seq)
+
+	block := <-bb.out
+	block.verificationDelay = make(chan struct{}) // add a delay to the block verification
+
+	vote, err := newTestVote(block, nodes[0])
+	require.NoError(t, err)
+
+	err = e.HandleMessage(&simplex.Message{
+		BlockMessage: &simplex.BlockMessage{
+			Vote:  *vote,
+			Block: block,
+		},
+	}, nodes[0])
+	require.NoError(t, err)
+
+	fCert, _ := newFinalizationRecord(t, l, signatureAggregator, block, nodes[0:quorum])
+	// send fcert
+	err = e.HandleMessage(&simplex.Message{
+		FinalizationCertificate: &fCert,
+	}, nodes[0])
+	require.NoError(t, err)
+
+	block.verificationDelay <- struct{}{} // unblock the block verification
+
+	storedBlock := storage.waitForBlockCommit(0)
+	require.Equal(t, uint64(1), storage.Height())
+	require.Equal(t, block, storedBlock)
+
+}
+
 func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder, seqCount uint64) []simplex.FinalizedBlock {
 	logger := testutil.MakeLogger(t, int(0))
 	ctx := context.Background()
