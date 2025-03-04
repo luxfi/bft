@@ -893,10 +893,7 @@ func (e *Epoch) indexFinalizationCertificates(startRound uint64) {
 		block := round.block
 		e.indexFinalizationCertificate(block, fCert)
 
-		// If the round we're committing is too far in the past, don't keep it in the rounds cache.
-		if fCert.Finalization.Round+e.maxRoundWindow < e.round {
-			delete(e.rounds, fCert.Finalization.Round)
-		}
+		e.deleteRounds(round.num)
 		// Clean up the future messages - Remove all messages we may have stored for the round
 		// the finalization is about.
 		for _, messagesFromNode := range e.futureMessages {
@@ -989,8 +986,6 @@ func (e *Epoch) persistEmptyNotarization(emptyNotarization *EmptyNotarization, s
 	e.Logger.Debug("Persisted empty block to WAL",
 		zap.Int("size", len(emptyNotarizationRecord)),
 		zap.Uint64("round", emptyNotarization.Vote.Round))
-
-	delete(e.emptyVotes, e.round)
 
 	if shouldBroadcast {
 		notarizationMessage := &Message{EmptyNotarization: emptyNotarization}
@@ -1884,10 +1879,28 @@ func (e *Epoch) voteOnBlock(block VerifiedBlock) (Vote, error) {
 	return sv, nil
 }
 
+// deletesRounds deletes all the rounds before [round] in the rounds map.
+func (e *Epoch) deleteRounds(round uint64) {
+	for i, r := range e.rounds {
+		if r.num+e.maxRoundWindow < round {
+			delete(e.rounds, i)
+		}
+	}
+}
+
+func (e *Epoch) deleteEmptyVoteForPreviousRound() {
+	if e.round == 0 {
+		return
+	}
+	delete(e.emptyVotes, e.round-1)
+}
+
 func (e *Epoch) increaseRound() {
 	// In case we're waiting for a block to be notarized, cancel the wait because
 	// we advanced to the next round.
 	e.cancelWaitForBlockNotarization()
+
+	e.deleteEmptyVoteForPreviousRound()
 
 	leader := LeaderForRound(e.nodes, e.round)
 	e.Logger.Info("Moving to a new round",
