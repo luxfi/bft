@@ -51,11 +51,11 @@ func TestHandleFinalizationCertificateRequest(t *testing.T) {
 		Sequences: sequences,
 	}}
 	resp := e.HandleReplicationRequest(req, nodes[1])
-	require.NotNil(t, resp.FinalizationCertificateResponse)
-	require.Equal(t, len(sequences), len(resp.FinalizationCertificateResponse.Data))
-	for i, data := range resp.FinalizationCertificateResponse.Data {
+	require.NotNil(t, resp.VerifiedFinalizationCertificateResponse)
+	require.Equal(t, len(sequences), len(resp.VerifiedFinalizationCertificateResponse.Data))
+	for i, data := range resp.VerifiedFinalizationCertificateResponse.Data {
 		require.Equal(t, seqs[i].FCert, data.FCert)
-		require.Equal(t, seqs[i].Block, data.Block)
+		require.Equal(t, seqs[i].VerifiedBlock, data.VerifiedBlock)
 	}
 
 	// request out of scope
@@ -63,7 +63,7 @@ func TestHandleFinalizationCertificateRequest(t *testing.T) {
 		Sequences: []uint64{11, 12, 13},
 	}}
 	resp = e.HandleReplicationRequest(req, nodes[1])
-	require.Zero(t, len(resp.FinalizationCertificateResponse.Data))
+	require.Zero(t, len(resp.VerifiedFinalizationCertificateResponse.Data))
 }
 
 func TestNilFinalizationCertificateResponse(t *testing.T) {
@@ -370,10 +370,10 @@ func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlo
 	}
 }
 
-func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder, seqCount uint64) []simplex.FinalizedBlock {
+func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder, seqCount uint64) []simplex.VerifiedFinalizedBlock {
 	logger := testutil.MakeLogger(t, int(0))
 	ctx := context.Background()
-	data := make([]simplex.FinalizedBlock, 0, seqCount)
+	data := make([]simplex.VerifiedFinalizedBlock, 0, seqCount)
 	var prev simplex.Digest
 	for i := uint64(0); i < seqCount; i++ {
 		protocolMetadata := simplex.ProtocolMetadata{
@@ -386,7 +386,7 @@ func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder,
 		require.True(t, ok)
 		prev = block.BlockHeader().Digest
 		fCert, _ := newFinalizationRecord(t, logger, &testSignatureAggregator{}, block, nodes)
-		data = append(data, simplex.FinalizedBlock{
+		data = append(data, simplex.VerifiedFinalizedBlock{
 			VerifiedBlock: block,
 			FCert:         fCert,
 		})
