@@ -77,7 +77,7 @@ func TestEpochHandleNotarizationFutureRound(t *testing.T) {
 	}, nodes[1])
 
 	// Run through round 0
-	notarizeAndFinalizeRound(t, nodes, 0, 0, e, bb, quorum, storage, false)
+	notarizeAndFinalizeRound(t, e, bb)
 
 	// Emulate round 1 by sending the block
 	vote, err := newTestVote(secondBlock, nodes[1])
@@ -327,7 +327,7 @@ func TestEpochFinalizeThenNotarize(t *testing.T) {
 
 	t.Run("commit without notarization, only with finalization", func(t *testing.T) {
 		for round := 0; round < 100; round++ {
-			notarizeAndFinalizeRound(t, nodes, uint64(round), uint64(round), e, bb, quorum, storage, true)
+			advanceRoundFromFinalization(t, e, bb)
 			storage.waitForBlockCommit(uint64(round))
 		}
 	})
@@ -369,13 +369,12 @@ func TestEpochSimpleFlow(t *testing.T) {
 	storage := newInMemStorage()
 
 	nodes := []NodeID{{1}, {2}, {3}, {4}}
-	quorum := Quorum(len(nodes))
 	conf := EpochConfig{
 		MaxProposalWait:     DefaultMaxProposalWaitTime,
 		Logger:              l,
 		ID:                  nodes[0],
 		Signer:              &testSigner{},
-		WAL:                 wal.NewMemWAL(t),
+		WAL:                 newTestWAL(t),
 		Verifier:            &testVerifier{},
 		Storage:             storage,
 		Comm:                noopComm(nodes),
@@ -390,7 +389,7 @@ func TestEpochSimpleFlow(t *testing.T) {
 
 	rounds := uint64(100)
 	for round := uint64(0); round < rounds; round++ {
-		notarizeAndFinalizeRound(t, nodes, round, round, e, bb, quorum, storage, false)
+		notarizeAndFinalizeRound(t, e, bb)
 	}
 }
 
@@ -420,14 +419,31 @@ func TestEpochStartedTwice(t *testing.T) {
 	require.ErrorIs(t, e.Start(), ErrAlreadyStarted)
 }
 
-func notarizeAndFinalizeRound(t *testing.T, nodes []NodeID, round, seq uint64, e *Epoch, bb *testBlockBuilder, quorum int, storage *InMemStorage, skipNotarization bool) {
+func advanceRoundFromNotarization(t *testing.T, e *Epoch, bb *testBlockBuilder) (VerifiedBlock, *Notarization) {
+	return advanceRound(t, e, bb, true, false)
+}
+
+func advanceRoundFromFinalization(t *testing.T, e *Epoch, bb *testBlockBuilder) VerifiedBlock {
+	block, _ := advanceRound(t, e, bb, false, true)
+	return block
+}
+
+func notarizeAndFinalizeRound(t *testing.T, e *Epoch, bb *testBlockBuilder) (VerifiedBlock, *Notarization) {
+	return advanceRound(t, e, bb, true, true)
+}
+
+// advanceRound progresses [e] to a new round. If [notarize] is set, the round will progress due to a notarization.
+// If [finalize] is set, the round will advance and the block will be indexed to storage.
+func advanceRound(t *testing.T, e *Epoch, bb *testBlockBuilder, notarize bool, finalize bool) (VerifiedBlock, *Notarization) {
+	require.True(t, notarize || finalize, "must either notarize or finalize a round to advance")
+	nodes := e.Comm.ListNodes()
+	quorum := Quorum(len(nodes))
 	// leader is the proposer of the new block for the given round
-	leader := LeaderForRound(nodes, round)
+	leader := LeaderForRound(nodes, e.Metadata().Round)
 	// only create blocks if we are not the node running the epoch
 	isEpochNode := leader.Equals(e.ID)
 	if !isEpochNode {
 		md := e.Metadata()
-		md.Seq = seq
 		_, ok := bb.BuildBlock(context.Background(), md)
 		require.True(t, ok)
 	}
@@ -447,27 +463,26 @@ func notarizeAndFinalizeRound(t *testing.T, nodes []NodeID, round, seq uint64, e
 		require.NoError(t, err)
 	}
 
-	if !skipNotarization {
+	var notarization *Notarization
+	if notarize {
 		// start at one since our node has already voted
-		for i := 1; i < quorum; i++ {
-			// Skip the vote of the block proposer
-			if leader.Equals(nodes[i]) {
-				continue
-			}
-			injectTestVote(t, e, block, nodes[i])
+		n, err := newNotarization(e.Logger, e.SignatureAggregator, block, nodes[0:quorum])
+		injectTestNotarization(t, e, n, nodes[1])
+
+		e.WAL.(*testWAL).assertNotarization(block.metadata.Round)
+		require.NoError(t, err)
+		notarization = &n
+	}
+
+	if finalize {
+		for i := 1; i <= quorum; i++ {
+			injectTestFinalization(t, e, block, nodes[i])
 		}
+		blockFromStorage := e.Storage.(*InMemStorage).waitForBlockCommit(block.metadata.Seq)
+		require.Equal(t, block, blockFromStorage)
 	}
 
-	for i := 1; i < quorum; i++ {
-		injectTestFinalization(t, e, block, nodes[i])
-	}
-
-	if skipNotarization {
-		injectTestFinalization(t, e, block, nodes[quorum])
-	}
-
-	block2 := storage.waitForBlockCommit(seq)
-	require.Equal(t, block, block2)
+	return block, notarization
 }
 
 func FuzzEpochInterleavingMessages(f *testing.F) {
@@ -1037,6 +1052,13 @@ func injectTestFinalization(t *testing.T, e *Epoch, block VerifiedBlock, id Node
 	require.NoError(t, err)
 }
 
+func injectTestNotarization(t *testing.T, e *Epoch, notarization Notarization, id NodeID) {
+	err := e.HandleMessage(&Message{
+		Notarization: &notarization,
+	}, id)
+	require.NoError(t, err)
+}
+
 type testQCDeserializer struct {
 	t *testing.T
 }
@@ -1109,6 +1131,24 @@ func (n noopComm) SendMessage(*Message, NodeID) {
 
 func (n noopComm) Broadcast(msg *Message) {
 
+}
+
+// ListnerComm is a comm that listens for incoming messages
+// and sends them to the [in] channel
+type listnerComm struct {
+	noopComm
+	in chan *Message
+}
+
+func NewListenerComm(nodeIDs []NodeID) *listnerComm {
+	return &listnerComm{
+		noopComm: noopComm(nodeIDs),
+		in:       make(chan *Message, 1),
+	}
+}
+
+func (b *listnerComm) SendMessage(msg *Message, id NodeID) {
+	b.in <- msg
 }
 
 type testBlockBuilder struct {

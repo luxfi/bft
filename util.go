@@ -12,16 +12,19 @@ import (
 // RetrieveLastIndexFromStorage retrieves the latest block and fCert from storage.
 // Returns an error if it cannot be retrieved but the storage has some block.
 // Returns (nil, nil) if the storage is empty.
-func RetrieveLastIndexFromStorage(s Storage) (VerifiedBlock, *FinalizationCertificate, error) {
+func RetrieveLastIndexFromStorage(s Storage) (*VerifiedFinalizedBlock, error) {
 	height := s.Height()
 	if height == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	lastBlock, fCert, retrieved := s.Retrieve(height - 1)
 	if !retrieved {
-		return nil, nil, fmt.Errorf("failed retrieving last block from storage with seq %d", height-1)
+		return nil, fmt.Errorf("failed retrieving last block from storage with seq %d", height-1)
 	}
-	return lastBlock, &fCert, nil
+	return &VerifiedFinalizedBlock{
+		VerifiedBlock: lastBlock,
+		FCert:         fCert,
+	}, nil
 }
 
 func IsFinalizationCertificateValid(eligibleSigners map[string]struct{}, fCert *FinalizationCertificate, quorumSize int, logger Logger) bool {
@@ -83,4 +86,54 @@ func hasSomeNodeSignedTwice(nodeIDs []NodeID, logger Logger) (NodeID, bool) {
 	}
 
 	return NodeID{}, false
+}
+
+// GetLatestVerifiedQuorumRound returns the latest verified quorum round given
+// a round, empty notarization, and last block. If all are nil, it returns nil.
+func GetLatestVerifiedQuorumRound(round *Round, emptyNotarization *EmptyNotarization, lastBlock *VerifiedFinalizedBlock) *VerifiedQuorumRound {
+	var verifiedQuorumRound *VerifiedQuorumRound
+	var highestRound uint64
+	var exists bool
+
+	if round != nil {
+		highestRound = round.num
+		verifiedQuorumRound = &VerifiedQuorumRound{
+			VerifiedBlock: round.block,
+			Notarization:  round.notarization,
+			FCert:         round.fCert,
+		}
+		exists = true
+	}
+
+	if emptyNotarization != nil {
+		emptyNoteRound := emptyNotarization.Vote.Round
+		if emptyNoteRound > highestRound || !exists {
+			verifiedQuorumRound = &VerifiedQuorumRound{
+				EmptyNotarization: emptyNotarization,
+			}
+			highestRound = emptyNotarization.Vote.ProtocolMetadata.Round
+			exists = true
+		}
+	}
+
+	if lastBlock != nil && (lastBlock.VerifiedBlock.BlockHeader().Round > highestRound || !exists) {
+		verifiedQuorumRound = &VerifiedQuorumRound{
+			VerifiedBlock: lastBlock.VerifiedBlock,
+			FCert:         &lastBlock.FCert,
+		}
+	}
+
+	return verifiedQuorumRound
+}
+
+// SetRound is a helper function that is used for tests to create a round.
+func SetRound(block VerifiedBlock, notarization *Notarization, fCert *FinalizationCertificate) *Round {
+	round := &Round{
+		block:        block,
+		notarization: notarization,
+		fCert:        fCert,
+		num:          block.BlockHeader().Round,
+	}
+
+	return round
 }

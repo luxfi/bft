@@ -4,22 +4,24 @@
 package simplex
 
 import (
+	"bytes"
 	"encoding/asn1"
 	"encoding/binary"
 	"fmt"
 )
 
 type Message struct {
-	BlockMessage            *BlockMessage
-	VerifiedBlockMessage    *VerifiedBlockMessage
-	EmptyNotarization       *EmptyNotarization
-	VoteMessage             *Vote
-	EmptyVoteMessage        *EmptyVote
-	Notarization            *Notarization
-	Finalization            *Finalization
-	FinalizationCertificate *FinalizationCertificate
-	ReplicationResponse     *ReplicationResponse
-	ReplicationRequest      *ReplicationRequest
+	BlockMessage                *BlockMessage
+	VerifiedBlockMessage        *VerifiedBlockMessage
+	EmptyNotarization           *EmptyNotarization
+	VoteMessage                 *Vote
+	EmptyVoteMessage            *EmptyVote
+	Notarization                *Notarization
+	Finalization                *Finalization
+	FinalizationCertificate     *FinalizationCertificate
+	ReplicationResponse         *ReplicationResponse
+	VerifiedReplicationResponse *VerifiedReplicationResponse
+	ReplicationRequest          *ReplicationRequest
 }
 
 type ToBeSignedEmptyVote struct {
@@ -221,33 +223,133 @@ type QuorumCertificate interface {
 }
 
 type ReplicationRequest struct {
-	FinalizationCertificateRequest *FinalizationCertificateRequest
+	Seqs        []uint64 // sequences we are requesting
+	LatestRound uint64   // latest round that we are aware of
 }
 
 type ReplicationResponse struct {
-	FinalizationCertificateResponse         *FinalizationCertificateResponse
-	VerifiedFinalizationCertificateResponse *VerifiedFinalizationCertificateResponse
+	Data        []QuorumRound
+	LatestRound *QuorumRound
 }
 
-// request a finalization certificate for the given sequence number
-type FinalizationCertificateRequest struct {
-	Sequences []uint64
+type VerifiedReplicationResponse struct {
+	Data        []VerifiedQuorumRound
+	LatestRound *VerifiedQuorumRound
 }
 
-type FinalizedBlock struct {
-	Block Block
-	FCert FinalizationCertificate
+// QuorumRound represents a round that has acheived quorum on either
+// (empty notarization), (block & notarization), or (block, finalization certificate)
+type QuorumRound struct {
+	Block             Block
+	Notarization      *Notarization
+	FCert             *FinalizationCertificate
+	EmptyNotarization *EmptyNotarization
+}
+
+// isWellFormed returns an error if the QuorumRound has either
+// (block, notarization) or (block, finalization certificate) or
+// (empty notarization)
+func (q *QuorumRound) IsWellFormed() error {
+	if q.EmptyNotarization != nil && q.Block == nil {
+		return nil
+	} else if q.Block != nil && (q.Notarization != nil || q.FCert != nil) {
+		return nil
+	}
+
+	return fmt.Errorf("malformed QuorumRound")
+}
+
+func (q *QuorumRound) GetRound() uint64 {
+	if q.EmptyNotarization != nil {
+		return q.EmptyNotarization.Vote.Round
+	}
+
+	if q.Block != nil {
+		return q.Block.BlockHeader().Round
+	}
+
+	return 0
+}
+
+func (q *QuorumRound) GetSequence() uint64 {
+	if q.EmptyNotarization != nil {
+		return q.EmptyNotarization.Vote.Seq
+	}
+
+	if q.Block != nil {
+		return q.Block.BlockHeader().Seq
+	}
+
+	return 0
+}
+
+func (q *QuorumRound) Verify() error {
+	if err := q.IsWellFormed(); err != nil {
+		return err
+	}
+
+	if q.EmptyNotarization != nil {
+		return q.EmptyNotarization.Verify()
+	}
+
+	// ensure the finalization certificate or notarization we get relates to the block
+	blockDigest := q.Block.BlockHeader().Digest
+
+	if q.FCert != nil {
+		if !bytes.Equal(blockDigest[:], q.FCert.Finalization.Digest[:]) {
+			return fmt.Errorf("finalization certificate does not match the block")
+		}
+		err := q.FCert.Verify()
+		if err != nil {
+			return err
+		}
+	}
+
+	if q.Notarization != nil {
+		if !bytes.Equal(blockDigest[:], q.Notarization.Vote.Digest[:]) {
+			return fmt.Errorf("notarization does not match the block")
+		}
+		return q.Notarization.Verify()
+	}
+
+	return nil
+}
+
+// String returns a string representation of the QuorumRound.
+// It is meant as a debugging aid for logs.
+func (q *QuorumRound) String() string {
+	if q != nil {
+		err := q.IsWellFormed()
+		if err != nil {
+			return fmt.Sprintf("QuorumRound{Error: %s}", err)
+		} else {
+			return fmt.Sprintf("QuorumRound{Round: %d, Seq: %d}", q.GetRound(), q.GetSequence())
+		}
+	}
+
+	return "QuorumRound{nil}"
+}
+
+type VerifiedQuorumRound struct {
+	VerifiedBlock     VerifiedBlock
+	Notarization      *Notarization
+	FCert             *FinalizationCertificate
+	EmptyNotarization *EmptyNotarization
+}
+
+func (q *VerifiedQuorumRound) GetRound() uint64 {
+	if q.EmptyNotarization != nil {
+		return q.EmptyNotarization.Vote.Round
+	}
+
+	if q.VerifiedBlock != nil {
+		return q.VerifiedBlock.BlockHeader().Round
+	}
+
+	return 0
 }
 
 type VerifiedFinalizedBlock struct {
 	VerifiedBlock VerifiedBlock
 	FCert         FinalizationCertificate
-}
-
-type FinalizationCertificateResponse struct {
-	Data []FinalizedBlock
-}
-
-type VerifiedFinalizationCertificateResponse struct {
-	Data []VerifiedFinalizedBlock
 }

@@ -23,10 +23,10 @@ func TestSimplexMultiNodeSimple(t *testing.T) {
 
 	nodes := []NodeID{{1}, {2}, {3}, {4}}
 	net := newInMemNetwork(t, nodes)
-	newSimplexNode(t, nodes[0], net, bb, false)
-	newSimplexNode(t, nodes[1], net, bb, false)
-	newSimplexNode(t, nodes[2], net, bb, false)
-	newSimplexNode(t, nodes[3], net, bb, false)
+	newSimplexNode(t, nodes[0], net, bb, nil)
+	newSimplexNode(t, nodes[1], net, bb, nil)
+	newSimplexNode(t, nodes[2], net, bb, nil)
+	newSimplexNode(t, nodes[3], net, bb, nil)
 
 	net.startInstances()
 
@@ -43,19 +43,30 @@ func (t *testNode) start() {
 	require.NoError(t.t, t.e.Start())
 }
 
-func newSimplexNodeWithStorage(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder, storage []VerifiedFinalizedBlock) *testNode {
-	wal := newTestWAL(t)
-	conf := defaultTestNodeEpochConfig(t, nodeID, net, wal, bb, true)
-	for _, data := range storage {
-		conf.Storage.Index(data.VerifiedBlock, data.FCert)
+type testNodeConfig struct {
+	// optional
+	initialStorage     []VerifiedFinalizedBlock
+	comm               Communication
+	replicationEnabled bool
+}
+
+// newSimplexNode creates a new testNode and adds it to [net].
+func newSimplexNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder, config *testNodeConfig) *testNode {
+	comm := newTestComm(nodeID, net, allowAllMessages)
+
+	epochConfig := defaultTestNodeEpochConfig(t, nodeID, comm, bb)
+
+	if config != nil {
+		updateEpochConfig(&epochConfig, config)
 	}
-	e, err := NewEpoch(conf)
+
+	e, err := NewEpoch(epochConfig)
 	require.NoError(t, err)
 	ti := &testNode{
-		wal:     wal,
+		wal:     epochConfig.WAL.(*testWAL),
 		e:       e,
 		t:       t,
-		storage: conf.Storage.(*InMemStorage),
+		storage: epochConfig.Storage.(*InMemStorage),
 		ingress: make(chan struct {
 			msg  *Message
 			from NodeID
@@ -65,42 +76,37 @@ func newSimplexNodeWithStorage(t *testing.T, nodeID NodeID, net *inMemNetwork, b
 	return ti
 }
 
-func newSimplexNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder, replicationEnabled bool) *testNode {
-	wal := newTestWAL(t)
-	conf := defaultTestNodeEpochConfig(t, nodeID, net, wal, bb, replicationEnabled)
-	e, err := NewEpoch(conf)
-	require.NoError(t, err)
-	ti := &testNode{
-		wal:     wal,
-		e:       e,
-		t:       t,
-		storage: conf.Storage.(*InMemStorage),
-		ingress: make(chan struct {
-			msg  *Message
-			from NodeID
-		}, 100)}
+func updateEpochConfig(epochConfig *EpochConfig, testConfig *testNodeConfig) {
+	// set the initial storage
+	for _, data := range testConfig.initialStorage {
+		epochConfig.Storage.Index(data.VerifiedBlock, data.FCert)
+	}
 
-	net.addNode(ti)
-	return ti
+	// TODO: remove optional replication flag
+	epochConfig.ReplicationEnabled = testConfig.replicationEnabled
+
+	// custom communication
+	if testConfig.comm != nil {
+		epochConfig.Comm = testConfig.comm
+	}
 }
 
-func defaultTestNodeEpochConfig(t *testing.T, nodeID NodeID, net *inMemNetwork, wal WriteAheadLog, bb BlockBuilder, replicationEnabled bool) EpochConfig {
+func defaultTestNodeEpochConfig(t *testing.T, nodeID NodeID, comm Communication, bb BlockBuilder) EpochConfig {
 	l := testutil.MakeLogger(t, int(nodeID[0]))
 	storage := newInMemStorage()
 	conf := EpochConfig{
 		MaxProposalWait:     DefaultMaxProposalWaitTime,
-		Comm:                newTestComm(nodeID, net),
+		Comm:                comm,
 		Logger:              l,
 		ID:                  nodeID,
 		Signer:              &testSigner{},
-		WAL:                 wal,
+		WAL:                 newTestWAL(t),
 		Verifier:            &testVerifier{},
 		Storage:             storage,
 		BlockBuilder:        bb,
 		SignatureAggregator: &testSignatureAggregator{},
 		BlockDeserializer:   &blockDeserializer{},
 		QCDeserializer:      &testQCDeserializer{t: t},
-		ReplicationEnabled:  replicationEnabled,
 		StartTime:           time.Now(),
 	}
 	return conf
@@ -242,15 +248,50 @@ func (tw *testWAL) containsEmptyVote(round uint64) bool {
 	return false
 }
 
-type testComm struct {
-	from NodeID
-	net  *inMemNetwork
+// messageFilter defines a function that filters
+// certain messages from being sent or broadcasted.
+type messageFilter func(*Message, NodeID) bool
+
+// allowAllMessages allows every message to be sent
+func allowAllMessages(*Message, NodeID) bool {
+	return true
 }
 
-func newTestComm(from NodeID, net *inMemNetwork) *testComm {
+// denyFinalizationMessages blocks any messages that would cause nodes in
+// a network to index a block in storage.
+func denyFinalizationMessages(msg *Message, destination NodeID) bool {
+	if msg.Finalization != nil {
+		return false
+	}
+	if msg.FinalizationCertificate != nil {
+		return false
+	}
+
+	return true
+}
+
+func onlyAllowEmptyRoundMessages(msg *Message, destination NodeID) bool {
+	if msg.EmptyNotarization != nil {
+		return true
+	}
+	if msg.EmptyVoteMessage != nil {
+		return true
+	}
+	return false
+}
+
+type testComm struct {
+	from          NodeID
+	net           *inMemNetwork
+	messageFilter messageFilter
+	lock          sync.RWMutex
+}
+
+func newTestComm(from NodeID, net *inMemNetwork, messageFilter messageFilter) *testComm {
 	return &testComm{
-		from: from,
-		net:  net,
+		from:          from,
+		net:           net,
+		messageFilter: messageFilter,
 	}
 }
 
@@ -259,6 +300,10 @@ func (c *testComm) ListNodes() []NodeID {
 }
 
 func (c *testComm) SendMessage(msg *Message, destination NodeID) {
+	if !c.isMessagePermitted(msg, destination) {
+		return
+	}
+
 	// cannot send if either [from] or [destination] is not connected
 	if c.net.IsDisconnected(destination) || c.net.IsDisconnected(c.from) {
 		return
@@ -277,32 +322,61 @@ func (c *testComm) SendMessage(msg *Message, destination NodeID) {
 	}
 }
 
+func (c *testComm) setFilter(filter messageFilter) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.messageFilter = filter
+}
+
 func (c *testComm) maybeTranslateOutoingToIncomingMessageTypes(msg *Message) {
-	if msg.ReplicationResponse != nil {
-		verifiedFCertResponse := msg.ReplicationResponse.VerifiedFinalizationCertificateResponse
+	if msg.VerifiedReplicationResponse != nil {
+		data := make([]QuorumRound, 0, len(msg.VerifiedReplicationResponse.Data))
 
-		if verifiedFCertResponse != nil {
-			data := make([]FinalizedBlock, 0, len(verifiedFCertResponse.Data))
-
-			for _, verifiedData := range verifiedFCertResponse.Data {
-				// Outgoing block is of type verified block but incoming block is of type Block,
-				// so we do a type cast because the test block implements both.
-				finalizedBlock := FinalizedBlock{
-					Block: verifiedData.VerifiedBlock.(Block),
-					FCert: verifiedData.FCert,
+		for _, verifiedQuorumRound := range msg.VerifiedReplicationResponse.Data {
+			// Outgoing block is of type verified block but incoming block is of type Block,
+			// so we do a type cast because the test block implements both.
+			quorumRound := QuorumRound{}
+			if verifiedQuorumRound.EmptyNotarization != nil {
+				quorumRound.EmptyNotarization = verifiedQuorumRound.EmptyNotarization
+			} else {
+				quorumRound.Block = verifiedQuorumRound.VerifiedBlock.(Block)
+				if verifiedQuorumRound.Notarization != nil {
+					quorumRound.Notarization = verifiedQuorumRound.Notarization
 				}
-				data = append(data, finalizedBlock)
+				if verifiedQuorumRound.FCert != nil {
+					quorumRound.FCert = verifiedQuorumRound.FCert
+				}
 			}
 
-			require.Nil(
-				c.net.t,
-				msg.ReplicationResponse.FinalizationCertificateResponse,
-				"message cannot include FinalizationCertificateResponse & VerifiedFinalizationCertificateResponse",
-			)
+			data = append(data, quorumRound)
+		}
 
-			msg.ReplicationResponse.FinalizationCertificateResponse = &FinalizationCertificateResponse{
-				Data: data,
+		var latestRound *QuorumRound
+		if msg.VerifiedReplicationResponse.LatestRound != nil {
+			if msg.VerifiedReplicationResponse.LatestRound.EmptyNotarization != nil {
+				latestRound = &QuorumRound{
+					EmptyNotarization: msg.VerifiedReplicationResponse.LatestRound.EmptyNotarization,
+				}
+			} else {
+				latestRound = &QuorumRound{
+					Block:             msg.VerifiedReplicationResponse.LatestRound.VerifiedBlock.(Block),
+					Notarization:      msg.VerifiedReplicationResponse.LatestRound.Notarization,
+					FCert:             msg.VerifiedReplicationResponse.LatestRound.FCert,
+					EmptyNotarization: msg.VerifiedReplicationResponse.LatestRound.EmptyNotarization,
+				}
 			}
+		}
+
+		require.Nil(
+			c.net.t,
+			msg.ReplicationResponse,
+			"message cannot include ReplicationResponse & VerifiedReplicationResponse",
+		)
+
+		msg.ReplicationResponse = &ReplicationResponse{
+			Data:        data,
+			LatestRound: latestRound,
 		}
 	}
 
@@ -315,6 +389,13 @@ func (c *testComm) maybeTranslateOutoingToIncomingMessageTypes(msg *Message) {
 	}
 }
 
+func (c *testComm) isMessagePermitted(msg *Message, destination NodeID) bool {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	return c.messageFilter(msg, destination)
+}
+
 func (c *testComm) Broadcast(msg *Message) {
 	if c.net.IsDisconnected(c.from) {
 		return
@@ -323,6 +404,9 @@ func (c *testComm) Broadcast(msg *Message) {
 	c.maybeTranslateOutoingToIncomingMessageTypes(msg)
 
 	for _, instance := range c.net.instances {
+		if !c.isMessagePermitted(msg, instance.e.ID) {
+			return
+		}
 		// Skip sending the message to yourself or disconnected nodes
 		if bytes.Equal(c.from, instance.e.ID) || c.net.IsDisconnected(instance.e.ID) {
 			continue
@@ -365,6 +449,12 @@ func (n *inMemNetwork) addNode(node *testNode) {
 	}
 	require.True(node.t, allowed, "node must be declared before adding")
 	n.instances = append(n.instances, node)
+}
+
+func (n *inMemNetwork) setAllNodesMessageFilter(filter messageFilter) {
+	for _, instance := range n.instances {
+		instance.e.Comm.(*testComm).setFilter(filter)
+	}
 }
 
 func (n *inMemNetwork) IsDisconnected(node NodeID) bool {
