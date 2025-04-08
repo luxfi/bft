@@ -30,3 +30,15 @@ func (nodes NodeIDs) String() string {
 	}
 	return fmt.Sprintf("%v", nodeStrings)
 }
+
+func (nodes NodeIDs) Remove(targetNode NodeID) []NodeID {
+	for i, n := range nodes {
+		if n.Equals(targetNode) {
+			result := make([]NodeID, 0, len(nodes)-1)
+			result = append(result, nodes[:i]...)
+			result = append(result, nodes[i+1:]...)
+			return result
+		}
+	}
+	return nodes
+}
