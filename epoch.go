@@ -863,6 +863,15 @@ func (e *Epoch) persistFinalizationCertificate(fCert FinalizationCertificate) er
 		if err := e.rebroadcastPastFinalizations(); err != nil {
 			return err
 		}
+
+		if e.round == fCert.Finalization.Round {
+			round, ok := e.rounds[e.round]
+			// This code path can be hit after incrementing the round from a notarization.
+			// this check ensure we do not double increment.
+			if ok && round.notarization == nil {
+				e.increaseRound()
+			}
+		}
 	}
 
 	finalizationCertificate := &Message{FinalizationCertificate: &fCert}
@@ -1545,6 +1554,14 @@ func (e *Epoch) createBlockVerificationTask(block Block, from NodeID, vote Vote)
 			// TODO: timeout
 		}
 
+		// We might have received votes and finalizations from future rounds before we received this block.
+		// So load the messages into our round data structure now that we have created it.
+		err = e.maybeLoadFutureMessages()
+		if err != nil {
+			e.haltedError = err
+			return md.Digest
+		}
+
 		// Check if we have timed out on this round.
 		// Although we store the proposal for this round,
 		// we refuse to vote for it because we have timed out.
@@ -1611,10 +1628,6 @@ func (e *Epoch) createFinalizedBlockVerificationTask(block Block, fCert Finaliza
 			e.Logger.Error("Failed to process replication state", zap.Error(err))
 			return md.Digest
 		}
-		err = e.maybeLoadFutureMessages()
-		if err != nil {
-			e.Logger.Warn("Failed to load future messages", zap.Error(err))
-		}
 
 		return md.Digest
 	}
@@ -1673,10 +1686,6 @@ func (e *Epoch) createNotarizedBlockVerificationTask(block Block, notarization N
 			e.haltedError = err
 			e.Logger.Error("Failed to process replication state", zap.Error(err))
 			return md.Digest
-		}
-		err = e.maybeLoadFutureMessages()
-		if err != nil {
-			e.Logger.Warn("Failed to load future messages", zap.Error(err))
 		}
 
 		return md.Digest
@@ -1869,6 +1878,8 @@ func (e *Epoch) proposeBlock(block VerifiedBlock) error {
 		zap.Int("size", len(rawBlock)),
 		zap.Stringer("digest", md.Digest))
 
+	// We might have received votes and finalizations from future rounds before we received this block.
+	// So load the messages into our round data structure now that we have created it.
 	return errors.Join(e.handleVoteMessage(&vote, e.ID), e.maybeLoadFutureMessages())
 }
 
@@ -2221,6 +2232,7 @@ func (e *Epoch) maybeLoadFutureMessages() error {
 		if e.round == round && height == e.Storage.Height() {
 			return nil
 		}
+		e.Logger.Debug("Round or height was increased while processing future messages", zap.Uint64("epoch round", e.round), zap.Uint64("Round", round), zap.Uint64("height", height), zap.Uint64("storage height", e.Storage.Height()))
 	}
 }
 
@@ -2246,10 +2258,6 @@ func (e *Epoch) storeProposal(block VerifiedBlock) bool {
 
 	round := NewRound(block)
 	e.rounds[md.Round] = round
-
-	// We might have received votes and finalizations from future rounds before we received this block.
-	// So load the messages into our round data structure now that we have created it.
-	e.maybeLoadFutureMessages()
 
 	return true
 }
@@ -2467,20 +2475,24 @@ func (e *Epoch) maybeAdvanceRoundFromEmptyNotarizations() (bool, error) {
 	nextSeqQuorum := e.replicationState.GetQuroumRoundWithSeq(expectedSeq)
 	if nextSeqQuorum != nil {
 		// num empty notarizations
-		for range nextSeqQuorum.GetRound() - round {
-			e.increaseRound()
+		if round < nextSeqQuorum.GetRound() {
+			for range nextSeqQuorum.GetRound() - round {
+				e.increaseRound()
+			}
+			return true, nil
 		}
-		return true, nil
 	}
 
 	// if there is no sequence, then maybe there is one with the same sequence but an empty notarization
 	sameSeqQuorum := e.replicationState.GetQuroumRoundWithSeq(expectedSeq - 1)
 	if sameSeqQuorum != nil && sameSeqQuorum.EmptyNotarization != nil {
 		// num empty notarizations
-		for range sameSeqQuorum.GetRound() - round {
-			e.increaseRound()
+		if round < nextSeqQuorum.GetRound() {
+			for range sameSeqQuorum.GetRound() - round {
+				e.increaseRound()
+			}
+			return true, nil
 		}
-		return true, nil
 	}
 
 	return false, nil
