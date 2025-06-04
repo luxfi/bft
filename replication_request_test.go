@@ -19,7 +19,7 @@ func TestReplicationeRequestIndexedBlocks(t *testing.T) {
 	numBlocks := uint64(10)
 	seqs := createBlocks(t, nodes, bb, numBlocks)
 	for _, data := range seqs {
-		conf.Storage.Index(data.VerifiedBlock, data.FCert)
+		conf.Storage.Index(data.VerifiedBlock, data.Finalization)
 	}
 	e, err := simplex.NewEpoch(conf)
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestReplicationeRequestIndexedBlocks(t *testing.T) {
 
 	require.Equal(t, len(sequences), len(resp.Data))
 	for i, data := range resp.Data {
-		require.Equal(t, seqs[i].FCert, *data.FCert)
+		require.Equal(t, seqs[i].Finalization, *data.Finalization)
 		require.Equal(t, seqs[i].VerifiedBlock, data.VerifiedBlock)
 	}
 
@@ -199,7 +199,7 @@ func TestNilReplicationResponse(t *testing.T) {
 
 // TestMalformedReplicationResponse tests that a malformed replication response is handled correctly.
 // This replication response is malformeds since it must also include a notarization or
-// finalization certificate.
+// finalization.
 func TestMalformedReplicationResponse(t *testing.T) {
 	bb := newTestControlledBlockBuilder(t)
 	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}

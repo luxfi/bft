@@ -36,17 +36,17 @@ func newNotarizationRecord(logger simplex.Logger, signatureAggregator simplex.Si
 	return record, nil
 }
 
-// creates a new finalization certificate
-func newFinalizationRecord(t *testing.T, logger simplex.Logger, signatureAggregator simplex.SignatureAggregator, block simplex.VerifiedBlock, ids []simplex.NodeID) (simplex.FinalizationCertificate, []byte) {
-	finalizations := make([]*simplex.Finalization, len(ids))
+// creates a new finalization
+func newFinalizationRecord(t *testing.T, logger simplex.Logger, signatureAggregator simplex.SignatureAggregator, block simplex.VerifiedBlock, ids []simplex.NodeID) (simplex.Finalization, []byte) {
+	finalizations := make([]*simplex.FinalizeVote, len(ids))
 	for i, id := range ids {
-		finalizations[i] = newTestFinalization(t, block, id)
+		finalizations[i] = newTestFinalizeVote(t, block, id)
 	}
 
-	fCert, err := simplex.NewFinalizationCertificate(logger, signatureAggregator, finalizations)
+	finalization, err := simplex.NewFinalization(logger, signatureAggregator, finalizations)
 	require.NoError(t, err)
 
-	record := simplex.NewQuorumRecord(fCert.QC.Bytes(), fCert.Finalization.Bytes(), record.FinalizationRecordType)
+	record := simplex.NewQuorumRecord(finalization.QC.Bytes(), finalization.Finalization.Bytes(), record.FinalizationRecordType)
 
-	return fCert, record
+	return finalization, record
 }

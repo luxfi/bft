@@ -14,7 +14,7 @@ import (
 
 // signedSequence is a sequence that has been signed by a qourum certificate.
 // it essentially is a quorum round without the enforcement of needing a block with a
-// finalization certificate or notarization.
+// finalization or notarization.
 type signedSequence struct {
 	seq     uint64
 	signers NodeIDs
@@ -23,9 +23,9 @@ type signedSequence struct {
 func newSignedSequenceFromRound(round QuorumRound) (*signedSequence, error) {
 	ss := &signedSequence{}
 	switch {
-	case round.FCert != nil:
-		ss.signers = round.FCert.QC.Signers()
-		ss.seq = round.FCert.Finalization.Seq
+	case round.Finalization != nil:
+		ss.signers = round.Finalization.QC.Signers()
+		ss.seq = round.Finalization.Finalization.Seq
 	case round.EmptyNotarization != nil:
 		ss.signers = round.EmptyNotarization.QC.Signers()
 		ss.seq = round.EmptyNotarization.Vote.Seq
@@ -33,7 +33,7 @@ func newSignedSequenceFromRound(round QuorumRound) (*signedSequence, error) {
 		ss.signers = round.Notarization.QC.Signers()
 		ss.seq = round.Notarization.Vote.Seq
 	default:
-		return nil, fmt.Errorf("round does not contain a finalization certificate, empty notarization, or notarization")
+		return nil, fmt.Errorf("round does not contain a finalization, empty notarization, or notarization")
 	}
 
 	return ss, nil
@@ -89,7 +89,7 @@ func (r *ReplicationState) isReplicationComplete(nextSeqToCommit uint64, current
 
 func (r *ReplicationState) collectMissingSequences(observedSignedSeq *signedSequence, nextSeqToCommit uint64) {
 	observedSeq := observedSignedSeq.seq
-	// Node is behind, but we've already sent messages to collect future fCerts
+	// Node is behind, but we've already sent messages to collect future finalizations
 	if r.lastSequenceRequested >= observedSeq && r.highestSequenceObserved != nil {
 		return
 	}
@@ -102,7 +102,7 @@ func (r *ReplicationState) collectMissingSequences(observedSignedSeq *signedSequ
 	// Don't exceed the max round window
 	endSeq := math.Min(float64(observedSeq), float64(r.maxRoundWindow+nextSeqToCommit))
 
-	r.logger.Debug("Node is behind, requesting missing finalization certificates", zap.Uint64("seq", observedSeq), zap.Uint64("startSeq", uint64(startSeq)), zap.Uint64("endSeq", uint64(endSeq)))
+	r.logger.Debug("Node is behind, requesting missing finalizations", zap.Uint64("seq", observedSeq), zap.Uint64("startSeq", uint64(startSeq)), zap.Uint64("endSeq", uint64(endSeq)))
 	r.sendReplicationRequests(uint64(startSeq), uint64(endSeq))
 }
 
@@ -113,7 +113,7 @@ func (r *ReplicationState) sendReplicationRequests(start uint64, end uint64) {
 	// it's possible our node has signed [highestSequenceObserved].
 	// For example this may happen if our node has sent a finalization
 	// for [highestSequenceObserved] and has not received the
-	// finalization certificate from the network.
+	// finalization from the network.
 	nodes := r.highestSequenceObserved.signers.Remove(r.id)
 	numNodes := len(nodes)
 
@@ -134,7 +134,7 @@ func (r *ReplicationState) sendReplicationRequests(start uint64, end uint64) {
 // In case the nodes[index] does not respond, we create a timeout that will
 // re-send the request.
 func (r *ReplicationState) sendRequestToNode(start uint64, end uint64, nodes []NodeID, index int) {
-	r.logger.Debug("Requesting missing finalization certificates ",
+	r.logger.Debug("Requesting missing finalizations ",
 		zap.Stringer("from", nodes[index]),
 		zap.Uint64("start", start),
 		zap.Uint64("end", end))
@@ -227,14 +227,14 @@ func findMissingNumbersInRange(start, end uint64, nums []uint64) []uint64 {
 	return result
 }
 
-func (r *ReplicationState) replicateBlocks(fCert *FinalizationCertificate, nextSeqToCommit uint64) {
+func (r *ReplicationState) replicateBlocks(finalization *Finalization, nextSeqToCommit uint64) {
 	if !r.enabled {
 		return
 	}
 
 	signedSequence := &signedSequence{
-		seq:     fCert.Finalization.Seq,
-		signers: fCert.QC.Signers(),
+		seq:     finalization.Finalization.Seq,
+		signers: finalization.QC.Signers(),
 	}
 
 	r.collectMissingSequences(signedSequence, nextSeqToCommit)
@@ -260,7 +260,7 @@ func (r *ReplicationState) maybeCollectFutureSequences(nextSequenceToCommit uint
 func (r *ReplicationState) StoreQuorumRound(round QuorumRound) {
 	if _, ok := r.receivedQuorumRounds[round.GetRound()]; ok {
 		// maybe this quorum round was behind
-		if r.receivedQuorumRounds[round.GetRound()].FCert == nil && round.FCert != nil {
+		if r.receivedQuorumRounds[round.GetRound()].Finalization == nil && round.Finalization != nil {
 			r.receivedQuorumRounds[round.GetRound()] = round
 		}
 		return
@@ -281,17 +281,17 @@ func (r *ReplicationState) StoreQuorumRound(round QuorumRound) {
 	r.receivedQuorumRounds[round.GetRound()] = round
 }
 
-func (r *ReplicationState) GetFinalizedBlockForSequence(seq uint64) (Block, FinalizationCertificate, bool) {
+func (r *ReplicationState) GetFinalizedBlockForSequence(seq uint64) (Block, Finalization, bool) {
 	for _, round := range r.receivedQuorumRounds {
 		if round.GetSequence() == seq {
-			if round.Block == nil || round.FCert == nil {
+			if round.Block == nil || round.Finalization == nil {
 				// this could be an empty notarization
 				continue
 			}
-			return round.Block, *round.FCert, true
+			return round.Block, *round.Finalization, true
 		}
 	}
-	return nil, FinalizationCertificate{}, false
+	return nil, Finalization{}, false
 }
 
 func (r *ReplicationState) highestKnownRound() uint64 {
