@@ -1,4 +1,4 @@
-module github.com/ava-labs/simplex
+module github.com/luxfi/simplex
 
 go 1.23.0
 

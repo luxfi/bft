@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/ava-labs/simplex"
-	"github.com/ava-labs/simplex/record"
-	"github.com/ava-labs/simplex/testutil"
-	"github.com/ava-labs/simplex/wal"
+	. "github.com/luxfi/simplex"
+	"github.com/luxfi/simplex/record"
+	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/simplex/wal"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"

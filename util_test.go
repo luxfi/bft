@@ -7,10 +7,10 @@ import (
 	"errors"
 	"testing"
 
-	. "github.com/ava-labs/simplex"
+	. "github.com/luxfi/simplex"
 
-	"github.com/ava-labs/simplex"
-	"github.com/ava-labs/simplex/testutil"
+	"github.com/luxfi/simplex"
+	"github.com/luxfi/simplex/testutil"
 
 	"github.com/stretchr/testify/require"
 )

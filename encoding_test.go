@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"github.com/ava-labs/simplex/record"
+	"github.com/luxfi/simplex/record"
 
 	"github.com/stretchr/testify/require"
 )

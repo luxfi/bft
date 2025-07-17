@@ -1,4 +1,4 @@
-# Simplex consensus for Avalanche
+# Simplex consensus for Lux
 
 ## Introduction
 
@@ -21,8 +21,8 @@ across different nodes and proposes batches in parallel.
 While the argument is correct, a fast consensus protocol isn't enough to guarantee a high end to end throughput for a blockchain.
 To fully utilize parallel block proposers, the VM should also support distributed transaction processing.
 
-The HyperSDK, Avalanche's "high throughput" VM of choice, 
-[plans to employ](https://hackmd.io/@patrickogrady/rys8mdl5p#Integrating-Vryx-with-the-HyperSDK-High-Level-Sketch) 
+The HyperSDK, Lux's "high throughput" VM of choice,
+[plans to employ](https://hackmd.io/@patrickogrady/rys8mdl5p#Integrating-Vryx-with-the-HyperSDK-High-Level-Sketch)
 techniques that totally order certificates of transaction chunk availability, which are of small size.
 
 Since the design of the HyperSDK does not require a high throughput consensus protocol,
@@ -37,7 +37,7 @@ For the sake of succinctness and simplicity, this document uses Proof of Authori
 
 A PoA setting can be thought of a PoS setting where all nodes have precisely the same stake,
 making each node have a "single vote". Similarly, a PoS setting can be thought of a PoA setting
-where the `N` nodes with the highest stake get to vote, and each node has a number of votes that is 
+where the `N` nodes with the highest stake get to vote, and each node has a number of votes that is
 proportional to the stake of the node with the lowest stake among the `N` nodes.
 
 
@@ -47,7 +47,7 @@ proportional to the stake of the node with the lowest stake among the `N` nodes.
 
 The protocol assumes a static set of `n` nodes, out of which up to and not including a third, are faulty.
 
-A quorum of nodes is defined as the smallest set such that two such sets of nodes intersect in at least one correct node. 
+A quorum of nodes is defined as the smallest set such that two such sets of nodes intersect in at least one correct node.
 If `n=3f+1` where `f` is the upper bound on faulty nodes, then a quorum is any set of nodes of size `2f+1`.
 Each node has a private key used for signing.
 The corresponding public key used for verifying signatures is known to all other nodes.
@@ -58,7 +58,7 @@ A node progresses in monotonically increasing and successive rounds.
 Each round has a (different) leader node designated to propose blocks and disseminate them to the rest of the nodes.
 Nodes only respond to the first block they see from the leader of that round.
 Once a leader node proposes a block, it participates in the remaining steps of the round as if it was a non-leader node.
-Except from the step in which the leader broadcasts a block, every other step involves a node broadcasting a signed message. 
+Except from the step in which the leader broadcasts a block, every other step involves a node broadcasting a signed message.
 All nodes can verify whether a node indeed signed the message or not.
 
 There exists a time period `T` that is a system-wide parameter and is used by the protocol.
@@ -97,15 +97,15 @@ It is up to the application to ensure that transactions arrive to the leader and
 
 ## Reconfiguring Simplex
 
-The Simplex paper assumes a static set of nodes. 
-However, validator nodes of a blockchain network may be added or removed while the protocol totally orders transactions. 
+The Simplex paper assumes a static set of nodes.
+However, validator nodes of a blockchain network may be added or removed while the protocol totally orders transactions.
 The act of adding or removing a validator node from the members of a consensus protocol is called reconfiguration.
 
 When Simplex finalizes a block that causes the node membership to change, we say that block contains a reconfiguration event.
 
-A reconfiguration event can be either a transaction that changes the node membership in the chain governed by the chain itself, 
-or it can even be a proof originating from a chain not governed by the bespoken chain, which simply attests the new 
-set of nodes running the Simplex consensus protocol. 
+A reconfiguration event can be either a transaction that changes the node membership in the chain governed by the chain itself,
+or it can even be a proof originating from a chain not governed by the bespoken chain, which simply attests the new
+set of nodes running the Simplex consensus protocol.
 
 The only requirements for Simplex are:
 
@@ -114,17 +114,17 @@ The only requirements for Simplex are:
 
 Reconfiguring a Simplex protocol while it totally orders transactions poses several challenges:
 
-1. In Simplex, node `p` may collect a quorum of finalization messages at a different round than node `q` 
-(for example, block `b` was notarized by a quorum of nodes at round `i` but only node `p` 
+1. In Simplex, node `p` may collect a quorum of finalization messages at a different round than node `q`
+(for example, block `b` was notarized by a quorum of nodes at round `i` but only node `p`
 collected a quorum of finalization votes in round `i+1`, and the rest voted for the empty block in round `i+1`
-and then collected the finalization votes in round `i+2`). 
-It is therefore not safe to apply the new node membership whenever a node collects a quorum of finalization votes, 
+and then collected the finalization votes in round `i+2`).
+It is therefore not safe to apply the new node membership whenever a node collects a quorum of finalization votes,
 as nodes at the same round may end up having different opinions of which nodes are eligible to be part of a quorum.
 2. In Simplex, blocks are proposed by alternating nodes.
 It may be the case that node `p` proposes a block in round `i` which contains a transaction which removes node `q`
 from the membership set, and the next node to propose a block is node `q`, in round `i+1`.
-If `q` proposes a block in round `i+1`, and it is notarized before the block in round `i` is finalized, 
-what is to become of the block proposed by `q` and other blocks built and notarized on top of it? 
+If `q` proposes a block in round `i+1`, and it is notarized before the block in round `i` is finalized,
+what is to become of the block proposed by `q` and other blocks built and notarized on top of it?
 Block `q` should not have been notarized because it was proposed by a node that was removed in round `i`,
 and therefore conceptually, all transactions in successive blocks need to be returned into the mem-pool.
 
@@ -139,13 +139,13 @@ In order to be able to dynamically reconfigure the membership set of the Simplex
 
 Given an old block `b` in epoch `e` and observing a block `b’` created in epoch `e+k` along with a set of finalization messages, it seems impossible to determine if `b’` is authentic or not, as there were reconfiguration events since the block `b` in epoch `e` was finalized. Therefore, the set of finalization messages on `b'` cannot be authenticated, as it’s not even clear how many nodes are there in epoch `e+k` in the first place.
 
-Fortunately, there is a way to check whether block `b’` is authentic or not: Let `{e, e+i, …, e+j, e+k}` be the series of epochs from block `b` to block `b’`, and let {`b, d, …, d’, b’`} be blocks where the sequence number of `d` and `d’` are `e+i` and `e+j` respectively. To be convinced of the authenticity of block `b’` one can just fetch the series of blocks {`b, d, …, d’, b’`} and validate them one by one. Since each block encodes its epoch number, and epoch numbers are block sequences that contain reconfiguration events, 
+Fortunately, there is a way to check whether block `b’` is authentic or not: Let `{e, e+i, …, e+j, e+k}` be the series of epochs from block `b` to block `b’`, and let {`b, d, …, d’, b’`} be blocks where the sequence number of `d` and `d’` are `e+i` and `e+j` respectively. To be convinced of the authenticity of block `b’` one can just fetch the series of blocks {`b, d, …, d’, b’`} and validate them one by one. Since each block encodes its epoch number, and epoch numbers are block sequences that contain reconfiguration events,
 then after validating the aforementioned series of blocks we are guaranteed whether `b’` is authentic or not.
 Hereafter we call the series of blocks  {`b, d, …, d’, b’`}  an *Epoch Change Series* (ECS).
 
 In practice, reconfiguration would work as follows:
 
-1. For a block `b` containing a reconfiguration event, in round `i` at epoch `e`, any descendant block of `b` in epoch `e` are treated as regular blocks, but they must only contain the metadata and no block data. 
+1. For a block `b` containing a reconfiguration event, in round `i` at epoch `e`, any descendant block of `b` in epoch `e` are treated as regular blocks, but they must only contain the metadata and no block data.
 Any descendant blocks that contain transactions are invalid.
 2. Since it is impossible to hand over these blocks and their corresponding finalizations to the application, the finalizations are written to the Write-Ahead-Log (WAL) along with the metadata
    to ensure proper restoration of the protocol state in case of a crash.
@@ -172,13 +172,13 @@ Simplex will assume an abstract and pluggable block storage with two basic opera
 type Storage interface {
    // Height returns how many blocks have been accepted so far.
    Height() uint64
-   
+
    // Retrieve retrieves the block and corresponding finalization
    // certificate from the storage, and returns false if it fails to do so.
-   Retrieve(seq uint64) (Block, FinalizationCertificate, bool, error) 
-   
+   Retrieve(seq uint64) (Block, FinalizationCertificate, bool, error)
+
    // Index persists the given block to stable storage and associates it with the given sequence.
-   Index(seq uint64, block Block, certificate FinalizationCertificate)   
+   Index(seq uint64, block Block, certificate FinalizationCertificate)
 }
 ```
 
@@ -188,10 +188,10 @@ The `FinalizationCertificate` message is defined later on, and `Block` is define
 type Block interface {
     // Metadata is the consensus specific metadata for the block
     Metadata() Metadata
-	
+
     // Bytes returns a byte encoding of the block
     Bytes() []byte
-	
+
 	// EndsEpoch returns whether the block causes an epoch change
 	EndsEpoch() bool
 }
@@ -224,7 +224,7 @@ type ProtocolMetadata struct {
    Version uint8
    // Epoch returns the epoch in which the block was proposed
    Epoch uint64
-   // Round returns the round number in which the block was proposed. 
+   // Round returns the round number in which the block was proposed.
    // Can also be an empty block.
    Round uint64
    // Seq is the order of the block among all blocks in the blockchain.
@@ -238,10 +238,10 @@ type ProtocolMetadata struct {
 
 ### Persisting protocol state to disk
 
-Besides long term persistent storage, Simplex will also utilize a Write-Ahead-Log (WAL). 
+Besides long term persistent storage, Simplex will also utilize a Write-Ahead-Log (WAL).
 
-A WAL is used to write intermediate steps in the consensus protocol’s operation. It’s needed for preserving consistency in the presence of crashes. 
-Essentially, each node uses the WAL to save its current step in the protocol execution before it moves to the next step. If the node crashes, it uses the WAL to find at which step in the protocol it crashed and knows how to resume its operation from that step.  
+A WAL is used to write intermediate steps in the consensus protocol’s operation. It’s needed for preserving consistency in the presence of crashes.
+Essentially, each node uses the WAL to save its current step in the protocol execution before it moves to the next step. If the node crashes, it uses the WAL to find at which step in the protocol it crashed and knows how to resume its operation from that step.
 The WAL will be implemented as an append-only file which will be pruned only upon a finalization of a data block. The WAL interface will be as follows:
 
 ```go
@@ -249,14 +249,14 @@ type WriteAheadLog interface {
    // Append appends the given record to the WAL,
    // and if prune is true, then the content of the WAL
    // may contain only the given record afterward.
-   Append(record Record, prune bool)  
+   Append(record Record, prune bool)
    // ReadAll() returns all records in the WAL
-   ReadAll() []Record  
+   ReadAll() []Record
 }
 ```
 
 The `prune` parameter indicates to the WAL that it is safe to prune the content of the WAL.
-In practice, whether the WAL prunes the entire data is up to implementation. 
+In practice, whether the WAL prunes the entire data is up to implementation.
 Some implementations may only prune the WAL once it grows beyond a certain size,
 for efficiency reasons.
 It is important for the append operation to be atomic with high probability.
@@ -266,12 +266,12 @@ Therefore, a checksum mechanism is employed to detect if Simplex crashed mid-wri
 A Record written by a WAL is defined as:
 
 ```protobuf
-Record {  
+Record {
    version uint8
-   size uint32  
-   type uint32  
-   payload bytes  
-   checksum bytes   
+   size uint32
+   type uint32
+   payload bytes
+   checksum bytes
 }
 ```
 
@@ -288,7 +288,7 @@ a `FinalizationCertificate` is passed to the application along with the correspo
 The messages saved in the WAL and the messages they transitively contain are as follows:
 
 - [Proposal](#proposal): A proposal is a block received by a leader of some round. It is written to the WAL
-so that if the node crashes and recovers, it will never vote to a different block for that round. 
+so that if the node crashes and recovers, it will never vote to a different block for that round.
 - [Notarization](#notarization): When a node collects a quorum of [SignedVote](#signedvote) messages on the same
   [Vote](#vote) message, it persists a notarization message to the WAL, so that when it recovers from a crash
 it will not vote for the empty block for that round.
@@ -296,7 +296,7 @@ it will not vote for the empty block for that round.
 once it collects a quorum of [SignedEmptyVote](#signedEmptyVote) messages on the same [EmptyVote](#emptyVote) message.
 - [FinalizationCertificate](#finalizationCertificate): Once a node collects a quorum of [SignedFinalization](#signedFinalization) messages
 on the same [Finalization](#finalization), it persists a finalization certificate to the WAL,
-in case the corresponding block cannot be written yet to the storage. 
+in case the corresponding block cannot be written yet to the storage.
 
 In case the signature algorithm allows aggregation of signatures, we define the aggregated messages below:
 
@@ -325,7 +325,7 @@ Therefore, in order to retain crash fault tolerance, we persist these finalizati
 Two useful facts can be deduced from the structure of the messages written to the WAL:
 
 1. The WAL of a node is not unique to that node, and two nodes in the same round may have the same WAL content.
-2. Nodes can verify each other's WAL content. 
+2. Nodes can verify each other's WAL content.
 
 Combining the two above facts leads to a conclusion: Nodes can safely replicate the WAL from each other.
 
@@ -333,7 +333,7 @@ Combining the two above facts leads to a conclusion: Nodes can safely replicate 
 
 In a real internet wide deployment, nodes may experience message loss due to plenty of reasons.  A consensus protocol that relies on messages being broadcast once, needs to be able to withstand sudden and unexpected message loss or know how to recover when they occur.  Otherwise, a node that missed a message or two, may find itself stuck in a round as the rest of the nodes advance to higher rounds. While consistency is not impacted, degradation of liveness of a consensus protocol can be severely detrimental to end user experience.
 
-A node that has been disconnected or just missed messages can synchronize with other nodes.  
+A node that has been disconnected or just missed messages can synchronize with other nodes.
 The synchronization mechanism is divided into two independent aspects:
 
 1. Detection of the straggler node that it needs to synchronize
@@ -351,7 +351,7 @@ If a node discovers it is behind, there are two mutually exclusive scenarios:
 
 If the node is behind just in the round number, it reaches to the nodes it knows and fetches missing blocks (with finalizations) as well as notarizations and empty notarizations.
 
-However, if the node is behind also in the epoch number, it first reaches the nodes it knows in order to fetch an ECS, in order to discover the latest set of members.   
+However, if the node is behind also in the epoch number, it first reaches the nodes it knows in order to fetch an ECS, in order to discover the latest set of members.
 Once it has established the latest membership of nodes it needs to interact with, it proceeds with synchronizing the blocks, notarizations and empty notarizations.
 
 The blocks and (empty) notarizations are replicated subject to the following rules:
@@ -376,10 +376,10 @@ or notarized via empty votes.
 
 ## Simplex API
 
-In order for the consensus protocol to be part of an application, such as avalanchego, 
+In order for the consensus protocol to be part of an application, such as Lux,
 Simplex will both depend on APIs from the application, and also give APIs for the application to use it.
 
-Examples of APIs that Simplex would expect from the application, 
+Examples of APIs that Simplex would expect from the application,
 are APIs for sending and signing messages, an API that would be triggerred once a block has been finalized,
 and an API to build a block.
 
@@ -406,7 +406,7 @@ type Message struct {
 It is the responsibility of the application to properly handle authentication, marshalling and wire protocol,
 and to construct the `Message` properly.
 
-Compared to the snowman consensus, the Simplex API would be at the engine level. 
+Compared to the snowman consensus, the Simplex API would be at the engine level.
 The reason for that it would be possible to integrate Simplex into a toy application for early testing,
 and also in order to be able to structure tests to run an entire network of nodes.
 
@@ -416,10 +416,10 @@ and also in order to be able to structure tests to run an entire network of node
 type Consensus interface {
     // AdvanceTime hints the engine that the given amount of time has passed.
     AdvanceTime(time.Duration)
-    
+
     // HandleMessage notifies the engine about a reception of a message.
     HandleMessage(msg Message, from NodeID)
-	
+
     // Metadata returns the latest protocol metadata known to this instance.
     Metadata() ProtocolMetadata
 }
@@ -428,7 +428,7 @@ type Consensus interface {
 
 ### The application API to the Simplex engine consists of several objects:
 
-The two most important APIs that an application exposes to Simplex, 
+The two most important APIs that an application exposes to Simplex,
 are an API to build blocks and as mentioned before, an API to store and retrieve them:
 
 
@@ -438,7 +438,7 @@ type BlockBuilder interface {
     // in which case a block and true are returned.
     // When the given context is cancelled by the caller, returns false.
     BuildBlock(ctx Context, metadata ProtocolMetadata) (Block, bool)
-	
+
     // IncomingBlock returns when either the given context is cancelled,
     // or when the application signals that a block should be built.
     IncomingBlock(ctx Context)
@@ -459,7 +459,7 @@ type BlockDeserializer interface {
 
 
 Whenever a Simplex instance recognizes it is its turn to propose a block, it calls
-into the application in order to build a block via the `BlockBuilder`. 
+into the application in order to build a block via the `BlockBuilder`.
 Similarly, when it has collected enough finalizations for a block,
 it passes the block and the finalizations to the application layer, which in turn, is responsible
 not only for indexing the block, but also removing the transactions of the block from the memory pool.
@@ -485,7 +485,7 @@ type Verifier interface {
     // that is the result of committing this block.
     // If the block doesn't cause an epoch change, this is a no-op.
     SetEpochChange(Block) error
-	
+
 }
 ```
 Blocks are verified using a `BlockVerifier`. It is the responsibility of the application that every block
@@ -506,21 +506,21 @@ which also can be configured on an epoch basis, is defined:
 
 ```go
 type Communication interface {
-	
+
     // Nodes returns all nodes known to the application.
     Nodes() []NodeID
-	
+
     // Send sends a message to the given destination node
     Send(msg Message, destination NodeID)
-    
-    // Broadcast broadcasts the given message to all nodes 
+
+    // Broadcast broadcasts the given message to all nodes
     Broadcast(msg Message)
 
     // SetEpochChange sets the epoch to correspond with the epoch
     // that is the result of committing this block.
     // If the block doesn't cause an epoch change, this is a no-op.
     SetEpochChange(Block) error
-	
+
 }
 ```
 
@@ -539,8 +539,8 @@ Thanks to Stephen Buttolph for invaluable feedback on this specification.
 
 <a name="proposal"></a>
 ```protobuf
-Proposal {  
-  block bytes  
+Proposal {
+  block bytes
 }
 ```
 
@@ -548,13 +548,13 @@ Proposal {
 <a name="vote"></a>
 
 ```protobuf
-Vote {  
-   version uint8  
-   digest bytes  
-   digest_algorithm uint32  
-   seq uint64  
-   round uint64  
-   epoch uint64  
+Vote {
+   version uint8
+   digest bytes
+   digest_algorithm uint32
+   seq uint64
+   round uint64
+   epoch uint64
    prev_hash bytes
 }
 ```
@@ -567,7 +567,7 @@ SignedVote {
     signature_algorithm uint32
     signer bytes
     signature bytes
-} 
+}
 ```
 
 <a name="notarization"></a>
@@ -584,9 +584,9 @@ Notarization {
 <a name="emptyVote"></a>
 
 ```protobuf
-EmptyVote {  
-   version uint8  
-   round uint64  
+EmptyVote {
+   version uint8
+   round uint64
    epoch uint64
 }
 ```
@@ -594,11 +594,11 @@ EmptyVote {
 <a name="signedEmptyVote"></a>
 
 ```protobuf
-SignedEmptyVote {  
-   empty_vote EmptyVote  
-   signature_algorithm uint16  
-   signer bytes  
-   signature bytes  
+SignedEmptyVote {
+   empty_vote EmptyVote
+   signature_algorithm uint16
+   signer bytes
+   signature bytes
 }
 ```
 
@@ -610,32 +610,32 @@ EmptyNotarization {
         empty_vote EmptyVote
         signature_algorithm uint32
         repeated signer bytes
-        repeated signature bytes  
+        repeated signature bytes
 }
 ```
 
 <a name="finalization"></a>
 
 ```protobuf
-Finalization {  
-   version uint8  
-   digest bytes  
-   digest_algorithm uint32  
-   seq uint64  
-   round uint64  
-   epoch uint64  
-   prev bytes  
+Finalization {
+   version uint8
+   digest bytes
+   digest_algorithm uint32
+   seq uint64
+   round uint64
+   epoch uint64
+   prev bytes
 }
 ```
 
 <a name="signedFinalization"></a>
 
 ```protobuf
-SignedFinalization {  
-   finalization Finalization  
-   signature_algorithm uint16  
-   signer bytes  
-   signature bytes  
+SignedFinalization {
+   finalization Finalization
+   signature_algorithm uint16
+   signer bytes
+   signature bytes
 }
 ```
 
@@ -654,33 +654,33 @@ type FinalizationCertificate struct {
 <a name="aggregatedSignedVote"></a>
 
 ```protobuf
-AggregatedSignedVote {  
-    vote Vote  
-    signature_algorithm uint16  
+AggregatedSignedVote {
+    vote Vote
+    signature_algorithm uint16
     signers repeated bytes
-    signature bytes  
+    signature bytes
 }
 ```
 
 <a name="aggregatedSignedEmptyVote"></a>
 
 ```protobuf
-AggregatedSignedEmptyVote {  
-    empty_vote EmptyVote  
+AggregatedSignedEmptyVote {
+    empty_vote EmptyVote
     signature_algorithm uint32
-    signers repeated bytes  
-    signature bytes  
+    signers repeated bytes
+    signature bytes
 }
 ```
 
 <a name="aggregatedSignedFinalization"></a>
 
 ```protobuf
-AggregatedSignedFinalization {  
-    finalization Finalization  
-    signature_algorithm uint16  
-    signers repeated bytes  
-    signature bytes  
+AggregatedSignedFinalization {
+    finalization Finalization
+    signature_algorithm uint16
+    signers repeated bytes
+    signature bytes
 }
 ```
 

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ava-labs/simplex/record"
+	"github.com/luxfi/simplex/record"
 
 	"go.uber.org/zap"
 )

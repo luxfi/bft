@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ava-labs/simplex/record"
+	"github.com/luxfi/simplex/record"
 )
 
 type QuorumRecord struct {

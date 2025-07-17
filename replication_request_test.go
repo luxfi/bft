@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ava-labs/simplex"
+	"github.com/luxfi/simplex"
 
 	"github.com/stretchr/testify/require"
 )
