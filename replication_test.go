@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2024, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"bytes"
@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/record"
-	"github.com/luxfi/simplex/testutil"
-	"github.com/luxfi/simplex/wal"
+	"github.com/luxfi/bft"
+	"github.com/luxfi/bft/record"
+	"github.com/luxfi/bft/testutil"
+	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,13 +21,13 @@ import (
 // TestReplication tests the replication process of a node that
 // is behind the rest of the network by less than maxRoundWindow.
 func TestBasicReplication(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
 
-	for i := range 3 * simplex.DefaultMaxRoundWindow {
+	for i := range 3 * bft.DefaultMaxRoundWindow {
 		testName := fmt.Sprintf("Basic replication_of_%d_blocks", i)
 
 		// lagging node cannot be the leader after node disconnects
-		isLaggingNodeLeader := bytes.Equal(simplex.LeaderForRound(nodes, uint64(i)), nodes[3])
+		isLaggingNodeLeader := bytes.Equal(bft.LeaderForRound(nodes, uint64(i)), nodes[3])
 		if isLaggingNodeLeader {
 			continue
 		}
@@ -39,7 +39,7 @@ func TestBasicReplication(t *testing.T) {
 	}
 }
 
-func testReplication(t *testing.T, startSeq uint64, nodes []simplex.NodeID) {
+func testReplication(t *testing.T, startSeq uint64, nodes []bft.NodeID) {
 	bb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
@@ -49,10 +49,10 @@ func testReplication(t *testing.T, startSeq uint64, nodes []simplex.NodeID) {
 		initialStorage:     storageData,
 		replicationEnabled: true,
 	}
-	normalNode1 := newSimplexNode(t, nodes[0], net, bb, testEpochConfig)
-	normalNode2 := newSimplexNode(t, nodes[1], net, bb, testEpochConfig)
-	normalNode3 := newSimplexNode(t, nodes[2], net, bb, testEpochConfig)
-	laggingNode := newSimplexNode(t, nodes[3], net, bb, &testNodeConfig{
+	normalNode1 := newBFTNode(t, nodes[0], net, bb, testEpochConfig)
+	normalNode2 := newBFTNode(t, nodes[1], net, bb, testEpochConfig)
+	normalNode3 := newBFTNode(t, nodes[2], net, bb, testEpochConfig)
+	laggingNode := newBFTNode(t, nodes[3], net, bb, &testNodeConfig{
 		replicationEnabled: true,
 	})
 
@@ -78,8 +78,8 @@ func testReplication(t *testing.T, startSeq uint64, nodes []simplex.NodeID) {
 // has been sent a different block by one node, however the rest of the network
 // notarizes a different block for the same round
 func TestReplicationAdversarialNode(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, []byte("lagging")}
-	quorum := simplex.Quorum(len(nodes))
+	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	quorum := bft.Quorum(len(nodes))
 	bb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
@@ -88,10 +88,10 @@ func TestReplicationAdversarialNode(t *testing.T) {
 	}
 
 	// doubleBlockProposalNode will propose two blocks for the same round
-	doubleBlockProposalNode := newSimplexNode(t, nodes[0], net, bb, testEpochConfig)
-	normalNode2 := newSimplexNode(t, nodes[1], net, bb, testEpochConfig)
-	normalNode3 := newSimplexNode(t, nodes[2], net, bb, testEpochConfig)
-	laggingNode := newSimplexNode(t, nodes[3], net, bb, &testNodeConfig{
+	doubleBlockProposalNode := newBFTNode(t, nodes[0], net, bb, testEpochConfig)
+	normalNode2 := newBFTNode(t, nodes[1], net, bb, testEpochConfig)
+	normalNode3 := newBFTNode(t, nodes[2], net, bb, testEpochConfig)
+	laggingNode := newBFTNode(t, nodes[3], net, bb, &testNodeConfig{
 		replicationEnabled: true,
 	})
 
@@ -104,8 +104,8 @@ func TestReplicationAdversarialNode(t *testing.T) {
 	doubleBlock := newTestBlock(doubleBlockProposalNode.e.Metadata())
 	doubleBlockVote, err := newTestVote(doubleBlock, doubleBlockProposalNode.e.ID)
 	require.NoError(t, err)
-	msg := &simplex.Message{
-		BlockMessage: &simplex.BlockMessage{
+	msg := &bft.Message{
+		BlockMessage: &bft.BlockMessage{
 			Block: doubleBlock,
 			Vote:  *doubleBlockVote,
 		},
@@ -114,7 +114,7 @@ func TestReplicationAdversarialNode(t *testing.T) {
 	laggingNode.e.HandleMessage(msg, doubleBlockProposalNode.e.ID)
 	net.Disconnect(laggingNode.e.ID)
 
-	blocks := []simplex.VerifiedBlock{}
+	blocks := []bft.VerifiedBlock{}
 	for i := range 2 {
 		bb.triggerNewBlock()
 		block := <-bb.out
@@ -131,7 +131,7 @@ func TestReplicationAdversarialNode(t *testing.T) {
 	net.Connect(laggingNode.e.ID)
 
 	finalization, _ := newFinalizationRecord(t, laggingNode.e.Logger, laggingNode.e.SignatureAggregator, blocks[1], nodes[:quorum])
-	finalizationMsg := &simplex.Message{
+	finalizationMsg := &bft.Message{
 		Finalization: &finalization,
 	}
 	laggingNode.e.HandleMessage(finalizationMsg, doubleBlockProposalNode.e.ID)
@@ -146,11 +146,11 @@ func TestReplicationAdversarialNode(t *testing.T) {
 // a lagging node and the rest of the network correctly propagate missing
 // finalizations and index all blocks.
 func TestRebroadcastingWithReplication(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	bb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
-	newNodeConfig := func(from simplex.NodeID) *testNodeConfig {
+	newNodeConfig := func(from bft.NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, allowAllMessages)
 		return &testNodeConfig{
 			comm:               comm,
@@ -158,12 +158,12 @@ func TestRebroadcastingWithReplication(t *testing.T) {
 		}
 	}
 
-	newSimplexNode(t, nodes[0], net, bb, newNodeConfig(nodes[0]))
-	newSimplexNode(t, nodes[1], net, bb, newNodeConfig(nodes[1]))
-	newSimplexNode(t, nodes[2], net, bb, newNodeConfig(nodes[2]))
+	newBFTNode(t, nodes[0], net, bb, newNodeConfig(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, newNodeConfig(nodes[1]))
+	newBFTNode(t, nodes[2], net, bb, newNodeConfig(nodes[2]))
 	// we do not expect the lagging node to build any blocks
 	laggingBb := newTestControlledBlockBuilder(t)
-	laggingNode := newSimplexNode(t, nodes[3], net, laggingBb, newNodeConfig(nodes[3]))
+	laggingNode := newBFTNode(t, nodes[3], net, laggingBb, newNodeConfig(nodes[3]))
 
 	for _, n := range net.instances {
 		require.Equal(t, uint64(0), n.storage.Height())
@@ -192,7 +192,7 @@ func TestRebroadcastingWithReplication(t *testing.T) {
 	net.setAllNodesMessageFilter(denyFinalizationMessages)
 	// normal nodes continue to make progress
 	for i := uint64(1); i < uint64(numNotarizations); i++ {
-		emptyRound := bytes.Equal(simplex.LeaderForRound(nodes, i), laggingNode.e.ID)
+		emptyRound := bytes.Equal(bft.LeaderForRound(nodes, i), laggingNode.e.ID)
 		if emptyRound {
 			advanceWithoutLeader(t, net, bb, epochTimes, i, laggingNode.e.ID)
 			missedSeqs++
@@ -234,10 +234,10 @@ func TestRebroadcastingWithReplication(t *testing.T) {
 // TestReplicationEmptyNotarizations ensures a lagging node will properly replicate
 // many empty notarizations in a row.
 func TestReplicationEmptyNotarizations(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}, {5}, {6}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}, {5}, {6}}
 
-	for endRound := uint64(2); endRound <= 2*simplex.DefaultMaxRoundWindow; endRound++ {
-		isLaggingNodeLeader := bytes.Equal(simplex.LeaderForRound(nodes, endRound), nodes[5])
+	for endRound := uint64(2); endRound <= 2*bft.DefaultMaxRoundWindow; endRound++ {
+		isLaggingNodeLeader := bytes.Equal(bft.LeaderForRound(nodes, endRound), nodes[5])
 		if isLaggingNodeLeader {
 			continue
 		}
@@ -250,11 +250,11 @@ func TestReplicationEmptyNotarizations(t *testing.T) {
 	}
 }
 
-func testReplicationEmptyNotarizations(t *testing.T, nodes []simplex.NodeID, endRound uint64) {
+func testReplicationEmptyNotarizations(t *testing.T, nodes []bft.NodeID, endRound uint64) {
 	bb := newTestControlledBlockBuilder(t)
 	laggingBb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
-	newNodeConfig := func(from simplex.NodeID) *testNodeConfig {
+	newNodeConfig := func(from bft.NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, allowAllMessages)
 		return &testNodeConfig{
 			comm:               comm,
@@ -263,12 +263,12 @@ func testReplicationEmptyNotarizations(t *testing.T, nodes []simplex.NodeID, end
 	}
 
 	startTimes := make([]time.Time, 0, len(nodes))
-	newSimplexNode(t, nodes[0], net, bb, newNodeConfig(nodes[0]))
-	newSimplexNode(t, nodes[1], net, bb, newNodeConfig(nodes[1]))
-	newSimplexNode(t, nodes[2], net, bb, newNodeConfig(nodes[2]))
-	newSimplexNode(t, nodes[3], net, bb, newNodeConfig(nodes[3]))
-	newSimplexNode(t, nodes[4], net, bb, newNodeConfig(nodes[4]))
-	laggingNode := newSimplexNode(t, nodes[5], net, laggingBb, newNodeConfig(nodes[5]))
+	newBFTNode(t, nodes[0], net, bb, newNodeConfig(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, newNodeConfig(nodes[1]))
+	newBFTNode(t, nodes[2], net, bb, newNodeConfig(nodes[2]))
+	newBFTNode(t, nodes[3], net, bb, newNodeConfig(nodes[3]))
+	newBFTNode(t, nodes[4], net, bb, newNodeConfig(nodes[4]))
+	laggingNode := newBFTNode(t, nodes[5], net, laggingBb, newNodeConfig(nodes[5]))
 
 	for _, n := range net.instances {
 		require.Equal(t, uint64(0), n.storage.Height())
@@ -291,7 +291,7 @@ func testReplicationEmptyNotarizations(t *testing.T, nodes []simplex.NodeID, end
 
 	// normal nodes continue to make progress
 	for i := uint64(1); i < endRound; i++ {
-		leader := simplex.LeaderForRound(nodes, i)
+		leader := bft.LeaderForRound(nodes, i)
 		if !leader.Equals(laggingNode.e.ID) {
 			bb.triggerNewBlock()
 		}
@@ -328,26 +328,26 @@ func testReplicationEmptyNotarizations(t *testing.T, nodes []simplex.NodeID, end
 // starts replicating in the middle of the current round.
 func TestReplicationStartsBeforeCurrentRound(t *testing.T) {
 	bb := newTestControlledBlockBuilder(t)
-	nodes := []simplex.NodeID{{1}, {2}, {3}, []byte("lagging")}
-	quorum := simplex.Quorum(len(nodes))
+	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	quorum := bft.Quorum(len(nodes))
 	net := newInMemNetwork(t, nodes)
-	startSeq := uint64(simplex.DefaultMaxRoundWindow + 3)
+	startSeq := uint64(bft.DefaultMaxRoundWindow + 3)
 	storageData := createBlocks(t, nodes, &bb.testBlockBuilder, startSeq)
 	testEpochConfig := &testNodeConfig{
 		initialStorage:     storageData,
 		replicationEnabled: true,
 	}
-	normalNode1 := newSimplexNode(t, nodes[0], net, bb, testEpochConfig)
-	normalNode2 := newSimplexNode(t, nodes[1], net, bb, testEpochConfig)
-	normalNode3 := newSimplexNode(t, nodes[2], net, bb, testEpochConfig)
-	laggingNode := newSimplexNode(t, nodes[3], net, bb, &testNodeConfig{
+	normalNode1 := newBFTNode(t, nodes[0], net, bb, testEpochConfig)
+	normalNode2 := newBFTNode(t, nodes[1], net, bb, testEpochConfig)
+	normalNode3 := newBFTNode(t, nodes[2], net, bb, testEpochConfig)
+	laggingNode := newBFTNode(t, nodes[3], net, bb, &testNodeConfig{
 		replicationEnabled: true,
 	})
 
 	firstBlock := storageData[0].VerifiedBlock
 	fBytes, err := firstBlock.Bytes()
 	require.NoError(t, err)
-	record := simplex.BlockRecord(firstBlock.BlockHeader(), fBytes)
+	record := bft.BlockRecord(firstBlock.BlockHeader(), fBytes)
 	laggingNode.wal.Append(record)
 
 	firstNotarizationRecord, err := newNotarizationRecord(laggingNode.e.Logger, laggingNode.e.SignatureAggregator, firstBlock, nodes[0:quorum])
@@ -357,7 +357,7 @@ func TestReplicationStartsBeforeCurrentRound(t *testing.T) {
 	secondBlock := storageData[1].VerifiedBlock
 	sBytes, err := secondBlock.Bytes()
 	require.NoError(t, err)
-	record = simplex.BlockRecord(secondBlock.BlockHeader(), sBytes)
+	record = bft.BlockRecord(secondBlock.BlockHeader(), sBytes)
 	laggingNode.wal.Append(record)
 
 	secondNotarizationRecord, err := newNotarizationRecord(laggingNode.e.Logger, laggingNode.e.SignatureAggregator, secondBlock, nodes[0:quorum])
@@ -388,11 +388,11 @@ func TestReplicationFutureFinalization(t *testing.T) {
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
 	storage := newInMemStorage()
 
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
-	quorum := simplex.Quorum(len(nodes))
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
+	quorum := bft.Quorum(len(nodes))
 	signatureAggregator := &testSignatureAggregator{}
-	conf := simplex.EpochConfig{
-		MaxProposalWait:     simplex.DefaultMaxProposalWaitTime,
+	conf := bft.EpochConfig{
+		MaxProposalWait:     bft.DefaultMaxProposalWaitTime,
 		Logger:              l,
 		ID:                  nodes[1],
 		Signer:              &testSigner{},
@@ -404,7 +404,7 @@ func TestReplicationFutureFinalization(t *testing.T) {
 		SignatureAggregator: signatureAggregator,
 	}
 
-	e, err := simplex.NewEpoch(conf)
+	e, err := bft.NewEpoch(conf)
 	require.NoError(t, err)
 
 	require.NoError(t, e.Start())
@@ -420,8 +420,8 @@ func TestReplicationFutureFinalization(t *testing.T) {
 	vote, err := newTestVote(block, nodes[0])
 	require.NoError(t, err)
 
-	err = e.HandleMessage(&simplex.Message{
-		BlockMessage: &simplex.BlockMessage{
+	err = e.HandleMessage(&bft.Message{
+		BlockMessage: &bft.BlockMessage{
 			Vote:  *vote,
 			Block: block,
 		},
@@ -430,7 +430,7 @@ func TestReplicationFutureFinalization(t *testing.T) {
 
 	finalization, _ := newFinalizationRecord(t, l, signatureAggregator, block, nodes[0:quorum])
 	// send finalization
-	err = e.HandleMessage(&simplex.Message{
+	err = e.HandleMessage(&bft.Message{
 		Finalization: &finalization,
 	}, nodes[0])
 	require.NoError(t, err)
@@ -449,12 +449,12 @@ func TestReplicationFutureFinalization(t *testing.T) {
 // and the rest of the nodes continue to make progress for another `endDisconnect - startDisconnect` blocks.
 // The lagging node reconnects and the after the next `finalization` is sent, the lagging node catches up to the latest height.
 func TestReplicationAfterNodeDisconnects(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
 
 	for startDisconnect := uint64(0); startDisconnect <= 5; startDisconnect++ {
 		for endDisconnect := uint64(10); endDisconnect <= 20; endDisconnect++ {
 			// lagging node cannot be the leader after node disconnects
-			isLaggingNodeLeader := bytes.Equal(simplex.LeaderForRound(nodes, endDisconnect), nodes[3])
+			isLaggingNodeLeader := bytes.Equal(bft.LeaderForRound(nodes, endDisconnect), nodes[3])
 			if isLaggingNodeLeader {
 				continue
 			}
@@ -469,17 +469,17 @@ func TestReplicationAfterNodeDisconnects(t *testing.T) {
 	}
 }
 
-func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, startDisconnect, endDisconnect uint64) {
+func testReplicationAfterNodeDisconnects(t *testing.T, nodes []bft.NodeID, startDisconnect, endDisconnect uint64) {
 	bb := newTestControlledBlockBuilder(t)
 	laggingBb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 	testConfig := &testNodeConfig{
 		replicationEnabled: true,
 	}
-	normalNode1 := newSimplexNode(t, nodes[0], net, bb, testConfig)
-	normalNode2 := newSimplexNode(t, nodes[1], net, bb, testConfig)
-	normalNode3 := newSimplexNode(t, nodes[2], net, bb, testConfig)
-	laggingNode := newSimplexNode(t, nodes[3], net, laggingBb, testConfig)
+	normalNode1 := newBFTNode(t, nodes[0], net, bb, testConfig)
+	normalNode2 := newBFTNode(t, nodes[1], net, bb, testConfig)
+	normalNode3 := newBFTNode(t, nodes[2], net, bb, testConfig)
+	laggingNode := newBFTNode(t, nodes[3], net, laggingBb, testConfig)
 
 	require.Equal(t, uint64(0), normalNode1.storage.Height())
 	require.Equal(t, uint64(0), normalNode2.storage.Height())
@@ -494,7 +494,7 @@ func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, s
 	net.startInstances()
 
 	for i := uint64(0); i < startDisconnect; i++ {
-		if bytes.Equal(simplex.LeaderForRound(nodes, i), nodes[3]) {
+		if bytes.Equal(bft.LeaderForRound(nodes, i), nodes[3]) {
 			laggingBb.triggerNewBlock()
 		} else {
 			bb.triggerNewBlock()
@@ -512,7 +512,7 @@ func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, s
 	// lagging node disconnects
 	net.Disconnect(nodes[3])
 
-	isLaggingNodeLeader := bytes.Equal(simplex.LeaderForRound(nodes, startDisconnect), nodes[3])
+	isLaggingNodeLeader := bytes.Equal(bft.LeaderForRound(nodes, startDisconnect), nodes[3])
 	if isLaggingNodeLeader {
 		laggingBb.triggerNewBlock()
 	}
@@ -520,7 +520,7 @@ func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, s
 	missedSeqs := uint64(0)
 	// normal nodes continue to make progress
 	for i := startDisconnect; i < endDisconnect; i++ {
-		emptyRound := bytes.Equal(simplex.LeaderForRound(nodes, i), nodes[3])
+		emptyRound := bytes.Equal(bft.LeaderForRound(nodes, i), nodes[3])
 		if emptyRound {
 			advanceWithoutLeader(t, net, bb, epochTimes, i, laggingNode.e.ID)
 			missedSeqs++
@@ -550,7 +550,7 @@ func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, s
 	}
 
 	// the lagging node should build a block when triggered if its the leader
-	if bytes.Equal(simplex.LeaderForRound(nodes, endDisconnect+1), nodes[3]) {
+	if bytes.Equal(bft.LeaderForRound(nodes, endDisconnect+1), nodes[3]) {
 		laggingBb.triggerNewBlock()
 	} else {
 		bb.triggerNewBlock()
@@ -561,9 +561,9 @@ func testReplicationAfterNodeDisconnects(t *testing.T, nodes []simplex.NodeID, s
 	}
 }
 
-func onlyAllowBlockProposalsAndNotarizations(msg *simplex.Message, _, to simplex.NodeID) bool {
+func onlyAllowBlockProposalsAndNotarizations(msg *bft.Message, _, to bft.NodeID) bool {
 	// TODO: remove hardcoded node id
-	if to.Equals(simplex.NodeID{4}) {
+	if to.Equals(bft.NodeID{4}) {
 		return (msg.BlockMessage != nil || msg.VerifiedBlockMessage != nil || msg.Notarization != nil)
 	}
 
@@ -573,8 +573,8 @@ func onlyAllowBlockProposalsAndNotarizations(msg *simplex.Message, _, to simplex
 // sendVotesToOneNode allows block messages to be sent to all nodes, and only
 // passes vote messages to one node. This will allows that node to notarize the block,
 // while the other blocks will timeout
-func sendVotesToOneNode(filteredInNode simplex.NodeID) messageFilter {
-	return func(msg *simplex.Message, _, to simplex.NodeID) bool {
+func sendVotesToOneNode(filteredInNode bft.NodeID) messageFilter {
+	return func(msg *bft.Message, _, to bft.NodeID) bool {
 		if msg.VerifiedBlockMessage != nil || msg.BlockMessage != nil {
 			return true
 		}
@@ -594,14 +594,14 @@ func sendVotesToOneNode(filteredInNode simplex.NodeID) messageFilter {
 // have a stale notarization for a round(i.e. a node notarized a block but the rest of the network
 // propagated an empty notarization).
 func TestReplicationNodeDiverges(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}, {5}, {6}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}, {5}, {6}}
 	numBlocks := uint64(5)
 
 	bb := newTestControlledBlockBuilder(t)
 	laggingNodeBb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
-	nodeConfig := func(from simplex.NodeID) *testNodeConfig {
+	nodeConfig := func(from bft.NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, sendVotesToOneNode(nodes[3]))
 		return &testNodeConfig{
 			comm:               comm,
@@ -609,14 +609,14 @@ func TestReplicationNodeDiverges(t *testing.T) {
 		}
 	}
 
-	newSimplexNode(t, nodes[0], net, bb, nodeConfig(nodes[0]))
-	newSimplexNode(t, nodes[1], net, bb, nodeConfig(nodes[1]))
-	newSimplexNode(t, nodes[2], net, bb, nodeConfig(nodes[2]))
-	laggingNode := newSimplexNode(t, nodes[3], net, laggingNodeBb, nodeConfig(nodes[3]))
+	newBFTNode(t, nodes[0], net, bb, nodeConfig(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, nodeConfig(nodes[1]))
+	newBFTNode(t, nodes[2], net, bb, nodeConfig(nodes[2]))
+	laggingNode := newBFTNode(t, nodes[3], net, laggingNodeBb, nodeConfig(nodes[3]))
 
 	// we need at least 6 nodes since the lagging node & leader will not timeout
-	newSimplexNode(t, nodes[4], net, bb, nodeConfig(nodes[4]))
-	newSimplexNode(t, nodes[5], net, bb, nodeConfig(nodes[5]))
+	newBFTNode(t, nodes[4], net, bb, nodeConfig(nodes[4]))
+	newBFTNode(t, nodes[5], net, bb, nodeConfig(nodes[5]))
 
 	startTimes := make([]time.Time, 0, len(nodes))
 	for _, n := range net.instances {
@@ -658,7 +658,7 @@ func TestReplicationNodeDiverges(t *testing.T) {
 	// advance [numBlocks] while the lagging node is disconnected
 	missedSeqs := uint64(1) // missed the first seq
 	for i := uint64(1); i < 1+numBlocks; i++ {
-		emptyRound := bytes.Equal(simplex.LeaderForRound(nodes, i), laggingNode.e.ID)
+		emptyRound := bytes.Equal(bft.LeaderForRound(nodes, i), laggingNode.e.ID)
 		if emptyRound {
 			advanceWithoutLeader(t, net, bb, startTimes, i, laggingNode.e.ID)
 			missedSeqs++
@@ -703,11 +703,11 @@ func assertEqualLedgers(t *testing.T, net *inMemNetwork) {
 }
 
 func TestReplicationNotarizationWithoutFinalizations(t *testing.T) {
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 
-	for numBlocks := uint64(1); numBlocks <= 3*simplex.DefaultMaxRoundWindow; numBlocks++ {
+	for numBlocks := uint64(1); numBlocks <= 3*bft.DefaultMaxRoundWindow; numBlocks++ {
 		// lagging node cannot be the leader after node disconnects
-		isLaggingNodeLeader := bytes.Equal(simplex.LeaderForRound(nodes, numBlocks), nodes[3])
+		isLaggingNodeLeader := bytes.Equal(bft.LeaderForRound(nodes, numBlocks), nodes[3])
 		if isLaggingNodeLeader {
 			continue
 		}
@@ -723,11 +723,11 @@ func TestReplicationNotarizationWithoutFinalizations(t *testing.T) {
 
 // TestReplicationNotarizationWithoutFinalizations tests that a lagging node will replicate
 // blocks that have notarizations but no finalizations.
-func testReplicationNotarizationWithoutFinalizations(t *testing.T, numBlocks uint64, nodes []simplex.NodeID) {
+func testReplicationNotarizationWithoutFinalizations(t *testing.T, numBlocks uint64, nodes []bft.NodeID) {
 	bb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
-	nodeConfig := func(from simplex.NodeID) *testNodeConfig {
+	nodeConfig := func(from bft.NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, onlyAllowBlockProposalsAndNotarizations)
 		return &testNodeConfig{
 			comm:               comm,
@@ -735,11 +735,11 @@ func testReplicationNotarizationWithoutFinalizations(t *testing.T, numBlocks uin
 		}
 	}
 
-	newSimplexNode(t, nodes[0], net, bb, nodeConfig(nodes[0]))
-	newSimplexNode(t, nodes[1], net, bb, nodeConfig(nodes[1]))
-	newSimplexNode(t, nodes[2], net, bb, nodeConfig(nodes[2]))
+	newBFTNode(t, nodes[0], net, bb, nodeConfig(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, nodeConfig(nodes[1]))
+	newBFTNode(t, nodes[2], net, bb, nodeConfig(nodes[2]))
 
-	laggingNode := newSimplexNode(t, nodes[3], net, bb, nodeConfig(nodes[3]))
+	laggingNode := newBFTNode(t, nodes[3], net, bb, nodeConfig(nodes[3]))
 
 	for _, n := range net.instances {
 		require.Equal(t, uint64(0), n.storage.Height())
@@ -767,7 +767,7 @@ func testReplicationNotarizationWithoutFinalizations(t *testing.T, numBlocks uin
 	}
 }
 
-func waitToEnterRound(t *testing.T, e *simplex.Epoch, round uint64) {
+func waitToEnterRound(t *testing.T, e *bft.Epoch, round uint64) {
 	timeout := time.NewTimer(time.Minute)
 	defer timeout.Stop()
 
@@ -785,7 +785,7 @@ func waitToEnterRound(t *testing.T, e *simplex.Epoch, round uint64) {
 	}
 }
 
-func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlockBuilder, epochTimes []time.Time, round uint64, laggingNodeId simplex.NodeID) {
+func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlockBuilder, epochTimes []time.Time, round uint64, laggingNodeId bft.NodeID) {
 	// we need to ensure all blocks are waiting for the channel before proceeding
 	// otherwise, we may send to a channel that is not ready to receive
 	for _, n := range net.instances {
@@ -797,7 +797,7 @@ func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlo
 	}
 
 	for _, n := range net.instances {
-		leader := n.e.ID.Equals(simplex.LeaderForRound(net.nodes, n.e.Metadata().Round))
+		leader := n.e.ID.Equals(bft.LeaderForRound(net.nodes, n.e.Metadata().Round))
 		if leader || laggingNodeId.Equals(n.e.ID) {
 			continue
 		}
@@ -807,7 +807,7 @@ func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlo
 	for i, n := range net.instances {
 		// the leader will not write an empty vote to the wal
 		// because it cannot both propose a block & send an empty vote in the same round
-		leader := n.e.ID.Equals(simplex.LeaderForRound(net.nodes, n.e.Metadata().Round))
+		leader := n.e.ID.Equals(bft.LeaderForRound(net.nodes, n.e.Metadata().Round))
 		if leader || laggingNodeId.Equals(n.e.ID) {
 			continue
 		}
@@ -823,13 +823,13 @@ func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlo
 	}
 }
 
-func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder, seqCount uint64) []simplex.VerifiedFinalizedBlock {
+func createBlocks(t *testing.T, nodes []bft.NodeID, bb bft.BlockBuilder, seqCount uint64) []bft.VerifiedFinalizedBlock {
 	logger := testutil.MakeLogger(t, int(0))
 	ctx := context.Background()
-	data := make([]simplex.VerifiedFinalizedBlock, 0, seqCount)
-	var prev simplex.Digest
+	data := make([]bft.VerifiedFinalizedBlock, 0, seqCount)
+	var prev bft.Digest
 	for i := uint64(0); i < seqCount; i++ {
-		protocolMetadata := simplex.ProtocolMetadata{
+		protocolMetadata := bft.ProtocolMetadata{
 			Seq:   i,
 			Round: i,
 			Prev:  prev,
@@ -839,7 +839,7 @@ func createBlocks(t *testing.T, nodes []simplex.NodeID, bb simplex.BlockBuilder,
 		require.True(t, ok)
 		prev = block.BlockHeader().Digest
 		finalization, _ := newFinalizationRecord(t, logger, &testSignatureAggregator{}, block, nodes)
-		data = append(data, simplex.VerifiedFinalizedBlock{
+		data = append(data, bft.VerifiedFinalizedBlock{
 			VerifiedBlock: block,
 			Finalization:  finalization,
 		})

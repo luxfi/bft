@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package bft
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/luxfi/simplex/record"
+	"github.com/luxfi/bft/record"
 )
 
 type QuorumRecord struct {

@@ -1,16 +1,16 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"errors"
 	"testing"
 
-	. "github.com/luxfi/simplex"
+	. "github.com/luxfi/bft"
 
-	"github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/bft"
+	"github.com/luxfi/bft/testutil"
 
 	"github.com/stretchr/testify/require"
 )
@@ -133,7 +133,7 @@ func TestFinalizationValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			valid := simplex.IsFinalizationValid(eligibleSigners, &tt.finalization, tt.quorumSize, l)
+			valid := bft.IsFinalizationValid(eligibleSigners, &tt.finalization, tt.quorumSize, l)
 			require.Equal(t, tt.valid, valid)
 		})
 	}
@@ -252,7 +252,7 @@ func TestGetHighestQuorumRound(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			qr := simplex.GetLatestVerifiedQuorumRound(tt.round, tt.eNote, tt.lastBlock)
+			qr := bft.GetLatestVerifiedQuorumRound(tt.round, tt.eNote, tt.lastBlock)
 			require.Equal(t, tt.expectedQr, qr)
 		})
 	}

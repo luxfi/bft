@@ -1,4 +1,4 @@
-module github.com/luxfi/simplex
+module github.com/luxfi/bft
 
 go 1.23.0
 

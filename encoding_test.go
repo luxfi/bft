@@ -1,14 +1,14 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package bft
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
 	"testing"
 
-	"github.com/luxfi/simplex/record"
+	"github.com/luxfi/bft/record"
 
 	"github.com/stretchr/testify/require"
 )

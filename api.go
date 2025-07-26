@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package bft
 
 import (
 	"context"
@@ -49,7 +49,7 @@ type Storage interface {
 	// Retrieve returns the block and finalization at [seq].
 	// If [seq] is not found, returns false.
 	Retrieve(seq uint64) (VerifiedBlock, Finalization, bool)
-	Index(block VerifiedBlock, certificate Finalization)
+	Index(ctx context.Context, block VerifiedBlock, certificate Finalization) error
 }
 
 type Communication interface {

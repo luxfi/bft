@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"bytes"
@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/record"
-	"github.com/luxfi/simplex/testutil"
-	"github.com/luxfi/simplex/wal"
+	. "github.com/luxfi/bft"
+	"github.com/luxfi/bft/record"
+	"github.com/luxfi/bft/testutil"
+	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
@@ -1454,7 +1454,7 @@ func (mem *InMemStorage) Clone() *InMemStorage {
 			panic(fmt.Sprintf("failed retrieving block %d", seq))
 		}
 		mem.lock.Unlock()
-		clone.Index(block, finalization)
+		clone.Index(context.Background(), block, finalization)
 	}
 	return clone
 }
@@ -1494,7 +1494,7 @@ func (mem *InMemStorage) Retrieve(seq uint64) (VerifiedBlock, Finalization, bool
 	return item.VerifiedBlock, item.Finalization, true
 }
 
-func (mem *InMemStorage) Index(block VerifiedBlock, certificate Finalization) {
+func (mem *InMemStorage) Index(ctx context.Context, block VerifiedBlock, certificate Finalization) error {
 	mem.lock.Lock()
 	defer mem.lock.Unlock()
 
@@ -1512,6 +1512,7 @@ func (mem *InMemStorage) Index(block VerifiedBlock, certificate Finalization) {
 	}
 
 	mem.signal.Signal()
+	return nil
 }
 
 type blockDeserializer struct {

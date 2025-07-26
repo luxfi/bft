@@ -12,7 +12,7 @@ import (
 )
 
 func new(t *testing.T) *WriteAheadLog {
-	fileName := filepath.Join(t.TempDir(), "simplex.wal")
+	fileName := filepath.Join(t.TempDir(), "bft.wal")
 	wal, err := New(fileName)
 	require.NoError(t, err)
 	return wal
@@ -88,7 +88,7 @@ func TestWalAppendAfterRead(t *testing.T) {
 func TestCorruptedFile(t *testing.T) {
 	require := require.New(t)
 
-	fileName := filepath.Join(t.TempDir(), "simplex.wal")
+	fileName := filepath.Join(t.TempDir(), "bft.wal")
 	wal, err := New(fileName)
 	require.NoError(err)
 	defer func() {

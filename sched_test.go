@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex
+package bft
 
 import (
 	"crypto/rand"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/bft/testutil"
 
 	"github.com/stretchr/testify/require"
 )

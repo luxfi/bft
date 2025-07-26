@@ -1,9 +1,9 @@
-package simplex_test
+package bft_test
 
 import (
 	"testing"
 
-	"github.com/luxfi/simplex"
+	"github.com/luxfi/bft"
 
 	"github.com/stretchr/testify/require"
 )
@@ -11,18 +11,18 @@ import (
 func TestQuorumRoundMalformed(t *testing.T) {
 	tests := []struct {
 		name        string
-		qr          simplex.QuorumRound
+		qr          bft.QuorumRound
 		expectedErr bool
 	}{
 		{
 			name: "empty notarization",
-			qr: simplex.QuorumRound{
-				EmptyNotarization: &simplex.EmptyNotarization{},
+			qr: bft.QuorumRound{
+				EmptyNotarization: &bft.EmptyNotarization{},
 			},
 			expectedErr: false,
 		}, {
 			name: "all nil",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				EmptyNotarization: nil,
 				Block:             nil,
 				Notarization:      nil,
@@ -31,52 +31,52 @@ func TestQuorumRoundMalformed(t *testing.T) {
 			expectedErr: true,
 		}, {
 			name: "block and notarization",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				Block:        &testBlock{},
-				Notarization: &simplex.Notarization{},
+				Notarization: &bft.Notarization{},
 			},
 			expectedErr: false,
 		}, {
 			name: "block and finalization",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				Block:        &testBlock{},
-				Finalization: &simplex.Finalization{},
+				Finalization: &bft.Finalization{},
 			},
 			expectedErr: false,
 		}, {
 			name: "block and empty notarization",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				Block:             &testBlock{},
-				EmptyNotarization: &simplex.EmptyNotarization{},
+				EmptyNotarization: &bft.EmptyNotarization{},
 			},
 			expectedErr: true,
 		},
 		{
 			name: "block and notarization and finalization",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				Block:        &testBlock{},
-				Notarization: &simplex.Notarization{},
-				Finalization: &simplex.Finalization{},
+				Notarization: &bft.Notarization{},
+				Finalization: &bft.Finalization{},
 			},
 			expectedErr: false,
 		},
 		{
 			name: "notarization and no block",
-			qr: simplex.QuorumRound{
-				Notarization: &simplex.Notarization{},
+			qr: bft.QuorumRound{
+				Notarization: &bft.Notarization{},
 			},
 			expectedErr: true,
 		},
 		{
 			name: "finalization and no block",
-			qr: simplex.QuorumRound{
-				Finalization: &simplex.Finalization{},
+			qr: bft.QuorumRound{
+				Finalization: &bft.Finalization{},
 			},
 			expectedErr: true,
 		},
 		{
 			name: "just block",
-			qr: simplex.QuorumRound{
+			qr: bft.QuorumRound{
 				Block: &testBlock{},
 			},
 			expectedErr: true,

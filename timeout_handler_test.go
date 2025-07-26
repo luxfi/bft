@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"sync"
@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/bft"
+	"github.com/luxfi/bft/testutil"
 
 	"github.com/stretchr/testify/require"
 )
@@ -18,14 +18,14 @@ import (
 func TestAddAndRunTask(t *testing.T) {
 	start := time.Now()
 	l := testutil.MakeLogger(t, 1)
-	nodes := []simplex.NodeID{{1}, {2}}
-	handler := simplex.NewTimeoutHandler(l, start, nodes)
+	nodes := []bft.NodeID{{1}, {2}}
+	handler := bft.NewTimeoutHandler(l, start, nodes)
 	defer handler.Close()
 
 	sent := make(chan struct{}, 1)
 	var count atomic.Int64
 
-	task := &simplex.TimeoutTask{
+	task := &bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "simplerun",
 		Deadline: start.Add(5 * time.Second),
@@ -53,12 +53,12 @@ func TestAddAndRunTask(t *testing.T) {
 func TestRemoveTask(t *testing.T) {
 	start := time.Now()
 	l := testutil.MakeLogger(t, 1)
-	nodes := []simplex.NodeID{{1}, {2}}
-	handler := simplex.NewTimeoutHandler(l, start, nodes)
+	nodes := []bft.NodeID{{1}, {2}}
+	handler := bft.NewTimeoutHandler(l, start, nodes)
 	defer handler.Close()
 
 	var ran bool
-	task := &simplex.TimeoutTask{
+	task := &bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "task2",
 		Deadline: start.Add(1 * time.Second),
@@ -79,8 +79,8 @@ func TestRemoveTask(t *testing.T) {
 func TestTaskOrder(t *testing.T) {
 	start := time.Now()
 	l := testutil.MakeLogger(t, 1)
-	nodes := []simplex.NodeID{{1}, {2}}
-	handler := simplex.NewTimeoutHandler(l, start, nodes)
+	nodes := []bft.NodeID{{1}, {2}}
+	handler := bft.NewTimeoutHandler(l, start, nodes)
 	defer handler.Close()
 
 	finished := make(chan struct{})
@@ -88,7 +88,7 @@ func TestTaskOrder(t *testing.T) {
 	var mu sync.Mutex
 	var results []string
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "first",
 		Deadline: start.Add(1 * time.Second),
@@ -100,7 +100,7 @@ func TestTaskOrder(t *testing.T) {
 		},
 	})
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[1],
 		TaskID:   "second",
 		Deadline: start.Add(2 * time.Second),
@@ -112,7 +112,7 @@ func TestTaskOrder(t *testing.T) {
 		},
 	})
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "noruntask",
 		Deadline: start.Add(4 * time.Second),
@@ -139,15 +139,15 @@ func TestTaskOrder(t *testing.T) {
 func TestAddTasksOutOfOrder(t *testing.T) {
 	start := time.Now()
 	l := testutil.MakeLogger(t, 1)
-	nodes := []simplex.NodeID{{1}, {2}}
-	handler := simplex.NewTimeoutHandler(l, start, nodes)
+	nodes := []bft.NodeID{{1}, {2}}
+	handler := bft.NewTimeoutHandler(l, start, nodes)
 	defer handler.Close()
 
 	finished := make(chan struct{})
 	var mu sync.Mutex
 	var results []string
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "third",
 		Deadline: start.Add(3 * time.Second),
@@ -159,7 +159,7 @@ func TestAddTasksOutOfOrder(t *testing.T) {
 		},
 	})
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "second",
 		Deadline: start.Add(2 * time.Second),
@@ -171,7 +171,7 @@ func TestAddTasksOutOfOrder(t *testing.T) {
 		},
 	})
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[1],
 		TaskID:   "fourth",
 		Deadline: start.Add(4 * time.Second),
@@ -183,7 +183,7 @@ func TestAddTasksOutOfOrder(t *testing.T) {
 		},
 	})
 
-	handler.AddTask(&simplex.TimeoutTask{
+	handler.AddTask(&bft.TimeoutTask{
 		NodeID:   nodes[0],
 		TaskID:   "first",
 		Deadline: start.Add(1 * time.Second),
@@ -222,35 +222,35 @@ func TestAddTasksOutOfOrder(t *testing.T) {
 func TestFindTask(t *testing.T) {
 	// Setup a mock logger
 	l := testutil.MakeLogger(t, 1)
-	nodes := []simplex.NodeID{{1}, {2}}
+	nodes := []bft.NodeID{{1}, {2}}
 	startTime := time.Now()
 
-	handler := simplex.NewTimeoutHandler(l, startTime, nodes)
+	handler := bft.NewTimeoutHandler(l, startTime, nodes)
 	defer handler.Close()
 
 	// Create some test tasks
-	task1 := &simplex.TimeoutTask{
+	task1 := &bft.TimeoutTask{
 		TaskID: "task1",
 		NodeID: nodes[0],
 		Start:  5,
 		End:    10,
 	}
 
-	taskSameRangeDiffNode := &simplex.TimeoutTask{
+	taskSameRangeDiffNode := &bft.TimeoutTask{
 		TaskID: "taskSameDiff",
 		NodeID: nodes[1],
 		Start:  5,
 		End:    10,
 	}
 
-	task3 := &simplex.TimeoutTask{
+	task3 := &bft.TimeoutTask{
 		TaskID: "task3",
 		NodeID: nodes[1],
 		Start:  25,
 		End:    30,
 	}
 
-	task4 := &simplex.TimeoutTask{
+	task4 := &bft.TimeoutTask{
 		TaskID: "task4",
 		NodeID: nodes[1],
 		Start:  31,
@@ -265,9 +265,9 @@ func TestFindTask(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		node     simplex.NodeID
+		node     bft.NodeID
 		seqs     []uint64
-		expected *simplex.TimeoutTask
+		expected *bft.TimeoutTask
 	}{
 		{
 			name:     "Find task with sequence in middle of range",
@@ -307,7 +307,7 @@ func TestFindTask(t *testing.T) {
 		},
 		{
 			name:     "Unknown node",
-			node:     simplex.NodeID("unknown"),
+			node:     bft.NodeID("unknown"),
 			seqs:     []uint64{5, 15, 25},
 			expected: nil,
 		},
@@ -321,7 +321,7 @@ func TestFindTask(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := simplex.FindReplicationTask(handler, tt.node, tt.seqs)
+			result := bft.FindReplicationTask(handler, tt.node, tt.seqs)
 			if tt.expected != result {
 				require.Fail(t, "not equal")
 			}

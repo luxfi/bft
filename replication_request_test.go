@@ -1,10 +1,11 @@
-package simplex_test
+package bft_test
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
-	"github.com/luxfi/simplex"
+	"github.com/luxfi/bft"
 
 	"github.com/stretchr/testify/require"
 )
@@ -12,22 +13,24 @@ import (
 // TestReplicationRequestIndexedBlocks tests replication requests for indexed blocks.
 func TestReplicationRequestIndexedBlocks(t *testing.T) {
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	comm := NewListenerComm(nodes)
+	ctx := context.Background()
 	conf := defaultTestNodeEpochConfig(t, nodes[0], comm, bb)
 	conf.ReplicationEnabled = true
 
 	numBlocks := uint64(10)
 	seqs := createBlocks(t, nodes, bb, numBlocks)
 	for _, data := range seqs {
-		conf.Storage.Index(data.VerifiedBlock, data.Finalization)
+		err := conf.Storage.Index(ctx, data.VerifiedBlock, data.Finalization)
+		require.NoError(t, err)
 	}
-	e, err := simplex.NewEpoch(conf)
+	e, err := bft.NewEpoch(conf)
 	require.NoError(t, err)
 	require.NoError(t, e.Start())
 	sequences := []uint64{0, 1, 2, 3}
-	req := &simplex.Message{
-		ReplicationRequest: &simplex.ReplicationRequest{
+	req := &bft.Message{
+		ReplicationRequest: &bft.ReplicationRequest{
 			Seqs:        sequences,
 			LatestRound: numBlocks,
 		},
@@ -47,8 +50,8 @@ func TestReplicationRequestIndexedBlocks(t *testing.T) {
 	}
 
 	// request out of scope
-	req = &simplex.Message{
-		ReplicationRequest: &simplex.ReplicationRequest{
+	req = &bft.Message{
+		ReplicationRequest: &bft.ReplicationRequest{
 			Seqs: []uint64{11, 12, 13},
 		},
 	}
@@ -65,21 +68,21 @@ func TestReplicationRequestIndexedBlocks(t *testing.T) {
 func TestReplicationRequestNotarizations(t *testing.T) {
 	// generate 5 blocks & notarizations
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	comm := NewListenerComm(nodes)
 	conf := defaultTestNodeEpochConfig(t, nodes[0], comm, bb)
 	conf.ReplicationEnabled = true
 
-	e, err := simplex.NewEpoch(conf)
+	e, err := bft.NewEpoch(conf)
 	require.NoError(t, err)
 	require.NoError(t, e.Start())
 
 	numBlocks := uint64(5)
-	rounds := make(map[uint64]simplex.VerifiedQuorumRound)
+	rounds := make(map[uint64]bft.VerifiedQuorumRound)
 	for i := uint64(0); i < numBlocks; i++ {
 		block, notarization := advanceRoundFromNotarization(t, e, bb)
 
-		rounds[i] = simplex.VerifiedQuorumRound{
+		rounds[i] = bft.VerifiedQuorumRound{
 			VerifiedBlock: block,
 			Notarization:  notarization,
 		}
@@ -91,8 +94,8 @@ func TestReplicationRequestNotarizations(t *testing.T) {
 	for k := range rounds {
 		seqs = append(seqs, k)
 	}
-	req := &simplex.Message{
-		ReplicationRequest: &simplex.ReplicationRequest{
+	req := &bft.Message{
+		ReplicationRequest: &bft.ReplicationRequest{
 			Seqs:        seqs,
 			LatestRound: 0,
 		},
@@ -119,35 +122,35 @@ func TestReplicationRequestNotarizations(t *testing.T) {
 func TestReplicationRequestMixed(t *testing.T) {
 	// generate 5 blocks & notarizations
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	comm := NewListenerComm(nodes)
 	conf := defaultTestNodeEpochConfig(t, nodes[0], comm, bb)
 	conf.ReplicationEnabled = true
 
-	e, err := simplex.NewEpoch(conf)
+	e, err := bft.NewEpoch(conf)
 	require.NoError(t, err)
 	require.NoError(t, e.Start())
 
 	numBlocks := uint64(8)
-	rounds := make(map[uint64]simplex.VerifiedQuorumRound)
+	rounds := make(map[uint64]bft.VerifiedQuorumRound)
 	// only produce a notarization for blocks we are the leader, otherwise produce an empty notarization
 	for i := range numBlocks {
-		leaderForRound := bytes.Equal(simplex.LeaderForRound(nodes, uint64(i)), e.ID)
+		leaderForRound := bytes.Equal(bft.LeaderForRound(nodes, uint64(i)), e.ID)
 		emptyBlock := !leaderForRound
 		if emptyBlock {
 			emptyNotarization := newEmptyNotarization(nodes, uint64(i), uint64(i))
-			e.HandleMessage(&simplex.Message{
+			e.HandleMessage(&bft.Message{
 				EmptyNotarization: emptyNotarization,
 			}, nodes[1])
 			e.WAL.(*testWAL).assertNotarization(uint64(i))
-			rounds[i] = simplex.VerifiedQuorumRound{
+			rounds[i] = bft.VerifiedQuorumRound{
 				EmptyNotarization: emptyNotarization,
 			}
 			continue
 		}
 		block, notarization := advanceRoundFromNotarization(t, e, bb)
 
-		rounds[i] = simplex.VerifiedQuorumRound{
+		rounds[i] = bft.VerifiedQuorumRound{
 			VerifiedBlock: block,
 			Notarization:  notarization,
 		}
@@ -159,8 +162,8 @@ func TestReplicationRequestMixed(t *testing.T) {
 		seqs = append(seqs, k)
 	}
 
-	req := &simplex.Message{
-		ReplicationRequest: &simplex.ReplicationRequest{
+	req := &bft.Message{
+		ReplicationRequest: &bft.ReplicationRequest{
 			Seqs:        seqs,
 			LatestRound: 0,
 		},
@@ -184,15 +187,15 @@ func TestReplicationRequestMixed(t *testing.T) {
 
 func TestNilReplicationResponse(t *testing.T) {
 	bb := newTestControlledBlockBuilder(t)
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	net := newInMemNetwork(t, nodes)
 
-	normalNode0 := newSimplexNode(t, nodes[0], net, bb, nil)
+	normalNode0 := newBFTNode(t, nodes[0], net, bb, nil)
 	normalNode0.start()
 
-	err := normalNode0.HandleMessage(&simplex.Message{
-		ReplicationResponse: &simplex.ReplicationResponse{
-			Data: []simplex.QuorumRound{{}},
+	err := normalNode0.HandleMessage(&bft.Message{
+		ReplicationResponse: &bft.ReplicationResponse{
+			Data: []bft.QuorumRound{{}},
 		},
 	}, nodes[1])
 	require.NoError(t, err)
@@ -203,15 +206,15 @@ func TestNilReplicationResponse(t *testing.T) {
 // finalization.
 func TestMalformedReplicationResponse(t *testing.T) {
 	bb := newTestControlledBlockBuilder(t)
-	nodes := []simplex.NodeID{{1}, {2}, {3}, {4}}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
 	net := newInMemNetwork(t, nodes)
 
-	normalNode0 := newSimplexNode(t, nodes[0], net, bb, nil)
+	normalNode0 := newBFTNode(t, nodes[0], net, bb, nil)
 	normalNode0.start()
 
-	err := normalNode0.HandleMessage(&simplex.Message{
-		ReplicationResponse: &simplex.ReplicationResponse{
-			Data: []simplex.QuorumRound{{
+	err := normalNode0.HandleMessage(&bft.Message{
+		ReplicationResponse: &bft.ReplicationResponse{
+			Data: []bft.QuorumRound{{
 				Block: &testBlock{},
 			}},
 		},

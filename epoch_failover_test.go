@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/bft/testutil"
 
-	"github.com/luxfi/simplex"
-	. "github.com/luxfi/simplex"
+	"github.com/luxfi/bft"
+	. "github.com/luxfi/bft"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
@@ -842,7 +842,7 @@ func TestEpochRebroadcastsEmptyVote(t *testing.T) {
 	}
 
 	emptyNotarization := newEmptyNotarization(nodes, 0, 0)
-	e.HandleMessage(&simplex.Message{
+	e.HandleMessage(&bft.Message{
 		EmptyNotarization: emptyNotarization,
 	}, nodes[2])
 

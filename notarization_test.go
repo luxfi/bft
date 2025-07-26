@@ -1,15 +1,15 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"bytes"
 	"errors"
 	"testing"
 
-	"github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/testutil"
+	"github.com/luxfi/bft"
+	"github.com/luxfi/bft/testutil"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,15 +21,15 @@ func TestNewNotarization(t *testing.T) {
 	testBlock := &testBlock{}
 	tests := []struct {
 		name                 string
-		votesForCurrentRound map[string]*simplex.Vote
-		block                simplex.VerifiedBlock
+		votesForCurrentRound map[string]*bft.Vote
+		block                bft.VerifiedBlock
 		expectError          error
-		signatureAggregator  simplex.SignatureAggregator
+		signatureAggregator  bft.SignatureAggregator
 	}{
 		{
 			name: "valid notarization",
-			votesForCurrentRound: func() map[string]*simplex.Vote {
-				votes := make(map[string]*simplex.Vote)
+			votesForCurrentRound: func() map[string]*bft.Vote {
+				votes := make(map[string]*bft.Vote)
 				nodeIds := [][]byte{{1}, {2}, {3}, {4}, {5}}
 				for _, nodeId := range nodeIds {
 					vote, err := newTestVote(testBlock, nodeId)
@@ -44,15 +44,15 @@ func TestNewNotarization(t *testing.T) {
 		},
 		{
 			name:                 "no votes",
-			votesForCurrentRound: map[string]*simplex.Vote{},
+			votesForCurrentRound: map[string]*bft.Vote{},
 			block:                testBlock,
 			signatureAggregator:  &testSignatureAggregator{},
-			expectError:          simplex.ErrorNoVotes,
+			expectError:          bft.ErrorNoVotes,
 		},
 		{
 			name: "error aggregating",
-			votesForCurrentRound: func() map[string]*simplex.Vote {
-				votes := make(map[string]*simplex.Vote)
+			votesForCurrentRound: func() map[string]*bft.Vote {
+				votes := make(map[string]*bft.Vote)
 				nodeIds := [][]byte{{1}, {2}, {3}, {4}, {5}}
 				for _, nodeId := range nodeIds {
 					vote, err := newTestVote(testBlock, nodeId)
@@ -69,7 +69,7 @@ func TestNewNotarization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			notarization, err := simplex.NewNotarization(l, tt.signatureAggregator, tt.votesForCurrentRound, tt.block.BlockHeader())
+			notarization, err := bft.NewNotarization(l, tt.signatureAggregator, tt.votesForCurrentRound, tt.block.BlockHeader())
 			require.ErrorIs(t, err, tt.expectError, "expected error, got nil")
 
 			if tt.expectError == nil {
@@ -89,15 +89,15 @@ func TestNewFinalization(t *testing.T) {
 	l := testutil.MakeLogger(t, 1)
 	tests := []struct {
 		name                 string
-		finalizeVotes        []*simplex.FinalizeVote
-		signatureAggregator  simplex.SignatureAggregator
-		expectedFinalization *simplex.ToBeSignedFinalization
-		expectedQC           *simplex.QuorumCertificate
+		finalizeVotes        []*bft.FinalizeVote
+		signatureAggregator  bft.SignatureAggregator
+		expectedFinalization *bft.ToBeSignedFinalization
+		expectedQC           *bft.QuorumCertificate
 		expectError          error
 	}{
 		{
 			name: "valid finalizations in order",
-			finalizeVotes: []*simplex.FinalizeVote{
+			finalizeVotes: []*bft.FinalizeVote{
 				newTestFinalizeVote(t, &testBlock{}, []byte{1}),
 				newTestFinalizeVote(t, &testBlock{}, []byte{2}),
 				newTestFinalizeVote(t, &testBlock{}, []byte{3}),
@@ -108,7 +108,7 @@ func TestNewFinalization(t *testing.T) {
 		},
 		{
 			name: "unsorted finalizations",
-			finalizeVotes: []*simplex.FinalizeVote{
+			finalizeVotes: []*bft.FinalizeVote{
 				newTestFinalizeVote(t, &testBlock{}, []byte{3}),
 				newTestFinalizeVote(t, &testBlock{}, []byte{1}),
 				newTestFinalizeVote(t, &testBlock{}, []byte{2}),
@@ -119,17 +119,17 @@ func TestNewFinalization(t *testing.T) {
 		},
 		{
 			name: "finalizations with different digests",
-			finalizeVotes: []*simplex.FinalizeVote{
+			finalizeVotes: []*bft.FinalizeVote{
 				newTestFinalizeVote(t, &testBlock{digest: [32]byte{1}}, []byte{1}),
 				newTestFinalizeVote(t, &testBlock{digest: [32]byte{2}}, []byte{2}),
 				newTestFinalizeVote(t, &testBlock{digest: [32]byte{3}}, []byte{3}),
 			},
 			signatureAggregator: &testSignatureAggregator{},
-			expectError:         simplex.ErrorInvalidFinalizationDigest,
+			expectError:         bft.ErrorInvalidFinalizationDigest,
 		},
 		{
 			name: "signature aggregator errors",
-			finalizeVotes: []*simplex.FinalizeVote{
+			finalizeVotes: []*bft.FinalizeVote{
 				newTestFinalizeVote(t, &testBlock{}, []byte{1}),
 			},
 			signatureAggregator: &testSignatureAggregator{err: errorSigAggregation},
@@ -137,15 +137,15 @@ func TestNewFinalization(t *testing.T) {
 		},
 		{
 			name:                "no votes",
-			finalizeVotes:       []*simplex.FinalizeVote{},
+			finalizeVotes:       []*bft.FinalizeVote{},
 			signatureAggregator: &testSignatureAggregator{},
-			expectError:         simplex.ErrorNoVotes,
+			expectError:         bft.ErrorNoVotes,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			finalization, err := simplex.NewFinalization(l, tt.signatureAggregator, tt.finalizeVotes)
+			finalization, err := bft.NewFinalization(l, tt.signatureAggregator, tt.finalizeVotes)
 			require.ErrorIs(t, err, tt.expectError, "expected error, got nil")
 
 			if tt.expectError == nil {

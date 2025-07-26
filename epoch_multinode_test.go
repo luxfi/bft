@@ -1,7 +1,7 @@
 // Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
-package simplex_test
+package bft_test
 
 import (
 	"bytes"
@@ -11,23 +11,23 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/luxfi/simplex"
-	"github.com/luxfi/simplex/record"
-	"github.com/luxfi/simplex/testutil"
-	"github.com/luxfi/simplex/wal"
+	. "github.com/luxfi/bft"
+	"github.com/luxfi/bft/record"
+	"github.com/luxfi/bft/testutil"
+	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSimplexMultiNodeSimple(t *testing.T) {
+func TestBFTMultiNodeSimple(t *testing.T) {
 	bb := newTestControlledBlockBuilder(t)
 
 	nodes := []NodeID{{1}, {2}, {3}, {4}}
 	net := newInMemNetwork(t, nodes)
-	newSimplexNode(t, nodes[0], net, bb, nil)
-	newSimplexNode(t, nodes[1], net, bb, nil)
-	newSimplexNode(t, nodes[2], net, bb, nil)
-	newSimplexNode(t, nodes[3], net, bb, nil)
+	newBFTNode(t, nodes[0], net, bb, nil)
+	newBFTNode(t, nodes[1], net, bb, nil)
+	newBFTNode(t, nodes[2], net, bb, nil)
+	newBFTNode(t, nodes[3], net, bb, nil)
 
 	net.startInstances()
 
@@ -67,10 +67,10 @@ func TestSplitVotes(t *testing.T) {
 		}
 	}
 
-	newSimplexNode(t, nodes[0], net, bb, config(nodes[0]))
-	newSimplexNode(t, nodes[1], net, bb, config(nodes[1]))
-	splitNode2 := newSimplexNode(t, nodes[2], net, bb, config(nodes[2]))
-	splitNode3 := newSimplexNode(t, nodes[3], net, bb, config(nodes[3]))
+	newBFTNode(t, nodes[0], net, bb, config(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, config(nodes[1]))
+	splitNode2 := newBFTNode(t, nodes[2], net, bb, config(nodes[2]))
+	splitNode3 := newBFTNode(t, nodes[3], net, bb, config(nodes[3]))
 
 	net.startInstances()
 
@@ -141,10 +141,9 @@ type testNodeConfig struct {
 	replicationEnabled bool
 }
 
-// newSimplexNode creates a new testNode and adds it to [net].
-func newSimplexNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder, config *testNodeConfig) *testNode {
+// newBFTNode creates a new testNode and adds it to [net].
+func newBFTNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder, config *testNodeConfig) *testNode {
 	comm := newTestComm(nodeID, net, allowAllMessages)
-
 	epochConfig := defaultTestNodeEpochConfig(t, nodeID, comm, bb)
 
 	if config != nil {
@@ -171,7 +170,7 @@ func newSimplexNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuil
 func updateEpochConfig(epochConfig *EpochConfig, testConfig *testNodeConfig) {
 	// set the initial storage
 	for _, data := range testConfig.initialStorage {
-		epochConfig.Storage.Index(data.VerifiedBlock, data.Finalization)
+		epochConfig.Storage.Index(context.Background(), data.VerifiedBlock, data.Finalization)
 	}
 
 	// TODO: remove optional replication flag
@@ -475,6 +474,13 @@ func onlyAllowEmptyRoundMessages(msg *Message, _, _ NodeID) bool {
 	return false
 }
 
+type testNetworkCommunication interface {
+	Communication
+	setFilter(filter messageFilter)
+}
+
+var _ testNetworkCommunication = (*testComm)(nil)
+
 type testComm struct {
 	from          NodeID
 	net           *inMemNetwork
@@ -648,7 +654,7 @@ func (n *inMemNetwork) addNode(node *testNode) {
 
 func (n *inMemNetwork) setAllNodesMessageFilter(filter messageFilter) {
 	for _, instance := range n.instances {
-		instance.e.Comm.(*testComm).setFilter(filter)
+		instance.e.Comm.(testNetworkCommunication).setFilter(filter)
 	}
 }
 
