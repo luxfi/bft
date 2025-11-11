@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
+	
+	"go.uber.org/zap/zapcore"
 )
 
 // TestReplication tests the replication process of a node that
@@ -767,24 +771,6 @@ func testReplicationNotarizationWithoutFinalizations(t *testing.T, numBlocks uin
 	}
 }
 
-func waitToEnterRound(t *testing.T, e *bft.Epoch, round uint64) {
-	timeout := time.NewTimer(time.Minute)
-	defer timeout.Stop()
-
-	for {
-		if e.Metadata().Round >= round {
-			return
-		}
-
-		select {
-		case <-time.After(time.Millisecond * 10):
-			continue
-		case <-timeout.C:
-			require.Fail(t, "timed out waiting for event")
-		}
-	}
-}
-
 func advanceWithoutLeader(t *testing.T, net *inMemNetwork, bb *testControlledBlockBuilder, epochTimes []time.Time, round uint64, laggingNodeId bft.NodeID) {
 	// we need to ensure all blocks are waiting for the channel before proceeding
 	// otherwise, we may send to a channel that is not ready to receive
@@ -845,4 +831,332 @@ func createBlocks(t *testing.T, nodes []bft.NodeID, bb bft.BlockBuilder, seqCoun
 		})
 	}
 	return data
+}
+
+func TestReplicationStuckInProposingBlock(t *testing.T) {
+	var aboutToBuildBlock sync.WaitGroup
+	aboutToBuildBlock.Add(2)
+
+	var cancelBlockBuilding sync.WaitGroup
+	cancelBlockBuilding.Add(1)
+
+	bb := newTestControlledBlockBuilder(t)
+	storage := newInMemStorage()
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
+	blocks := createBlocks(t, nodes, &bb.testBlockBuilder, 5)
+
+	quorum := bft.Quorum(len(nodes))
+	sentMessages := make(chan *bft.Message, 100)
+
+	l := testutil.MakeLogger(t, 1)
+	l.Intercept(func(entry zapcore.Entry) error {
+		if strings.Contains(entry.Message, "Scheduling block building") {
+			aboutToBuildBlock.Done()
+		}
+		if strings.Contains(entry.Message, "We are the leader of this round, but a higher round has been finalized. Aborting block building.") {
+			cancelBlockBuilding.Done()
+		}
+		return nil
+	})
+
+	wal := newTestWAL(t)
+	conf := bft.EpochConfig{
+		MaxProposalWait:     bft.DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[0],
+		Signer:              &testSigner{},
+		WAL:                 wal,
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                &recordingComm{Communication: noopComm(nodes), BroadcastMessages: sentMessages},
+		BlockBuilder:        bb,
+		SignatureAggregator: &testSignatureAggregator{},
+	}
+	conf.ReplicationEnabled = true
+
+	e, err := bft.NewEpoch(conf)
+	e.ReplicationEnabled = true
+	require.NoError(t, err)
+	require.NoError(t, e.Start())
+
+	bb.in <- blocks[0].VerifiedBlock.(*testBlock)
+	bb.out <- blocks[0].VerifiedBlock.(*testBlock)
+
+	bb.triggerNewBlock()
+	notarizeAndFinalizeRound(t, e, &bb.testBlockBuilder)
+
+	gb := storage.waitForBlockCommit(0)
+	require.Equal(t, gb, blocks[0].VerifiedBlock.(*testBlock))
+
+	highBlock, _ := blocks[3].VerifiedBlock.(*testBlock)
+
+	highFinalization, _ := newFinalizationRecord(t, e.Logger, e.SignatureAggregator, highBlock, nodes[0:quorum])
+
+	// Trigger the replication process to start by sending a finalization for a block we do not have
+	e.HandleMessage(&bft.Message{
+		Finalization: &highFinalization,
+	}, nodes[1])
+
+	// Wait for the replication request to be sent
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+
+	// Drain the block builder channels
+	for len(bb.testBlockBuilder.blockShouldBeBuilt) > 0 && len(bb.out) > 0 {
+		select {
+		case <-bb.testBlockBuilder.blockShouldBeBuilt:
+		default:
+		}
+		select {
+		case <-bb.out:
+		default:
+		}
+	}
+
+	// Prepare the quorum round answer to be sent as a response to the replication request
+	quorumRounds := make([]bft.QuorumRound, 0, 4)
+	for i := uint64(1); i <= 4; i++ {
+		tb := blocks[i].VerifiedBlock.(*testBlock)
+		finalization := blocks[i].Finalization
+		quorumRounds = append(quorumRounds, bft.QuorumRound{
+			Block:        tb,
+			Finalization: &finalization,
+		})
+	}
+
+	// Respond to the replication request with a block that has a notarization
+	replicationResponse := &bft.ReplicationResponse{
+		LatestRound: &quorumRounds[2],
+		Data:        quorumRounds[:3],
+	}
+
+	e.HandleMessage(&bft.Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[1])
+
+	// Wait for the second block to be attempted to be built
+	aboutToBuildBlock.Wait()
+
+	// Trigger the replication process to start by sending a finalization for a block we do not have
+	e.HandleMessage(&bft.Message{
+		Finalization: &blocks[4].Finalization,
+	}, nodes[1])
+
+	// Wait for the replication request to be sent
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+
+	replicationResponse = &bft.ReplicationResponse{
+		LatestRound: &quorumRounds[3],
+		Data:        quorumRounds[3:],
+	}
+
+	e.HandleMessage(&bft.Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[1])
+
+	storage.waitForBlockCommit(4)
+
+	// Just for sanity, ensure that the block building was cancelled
+	cancelBlockBuilding.Wait()
+}
+
+func TestReplicationVerifyEmptyNotarization(t *testing.T) {
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1), blockShouldBeBuilt: make(chan struct{}, 1)}
+
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
+
+	// This function takes a QC and makes it that it is signed by only 2 out of 4 nodes,
+	// while still having a quorum of signatures.
+	corruptQC := func(qc bft.QuorumCertificate) bft.QuorumCertificate {
+		badQC := qc.(testQC)
+		// Duplicate the last signature
+		badQC = append(badQC, badQC[len(badQC)-1])
+		// Remove the first signature
+		badQC = badQC[1:]
+
+		// Finalization should have 3 signers
+		require.Len(t, badQC.Signers(), 3)
+
+		// But all these signers are either the second and third node.
+		require.Contains(t, badQC.Signers(), nodes[1])
+		require.Contains(t, badQC.Signers(), nodes[2])
+
+		// Not the first or the fourth node.
+		require.NotContains(t, badQC.Signers(), nodes[0])
+		require.NotContains(t, badQC.Signers(), nodes[3])
+
+		return badQC
+	}
+
+	quorum := bft.Quorum(len(nodes))
+	sentMessages := make(chan *bft.Message, 100)
+	l := testutil.MakeLogger(t, 1)
+	wal := newTestWAL(t)
+	storage := newInMemStorage()
+	conf := bft.EpochConfig{
+		MaxProposalWait:     bft.DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[1],
+		Signer:              &testSigner{},
+		WAL:                 wal,
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                &recordingComm{Communication: noopComm(nodes), BroadcastMessages: sentMessages},
+		BlockBuilder:        bb,
+		SignatureAggregator: &testSignatureAggregator{},
+	}
+	conf.ReplicationEnabled = true
+
+	e, err := bft.NewEpoch(conf)
+	require.NoError(t, err)
+	require.NoError(t, e.Start())
+
+	md := e.Metadata()
+	_, ok := bb.BuildBlock(context.Background(), md)
+	require.True(t, ok)
+	require.Equal(t, md.Round, md.Seq)
+
+	block := <-bb.out
+
+	finalization, _ := newFinalizationRecord(t, l, e.SignatureAggregator, block, nodes[0:quorum])
+
+	// Trigger the replication process to start by sending a finalization for a block we do not have
+	e.HandleMessage(&bft.Message{
+		Finalization: &finalization,
+	}, nodes[0])
+
+	// Wait for the replication request to be sent
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+
+	emptyNotarization := newEmptyNotarization(nodes[0:quorum], 0, 0)
+
+	// Corrupt the QC
+	emptyNotarization.QC = corruptQC(emptyNotarization.QC)
+
+	// Respond to the replication request with a block that has a notarization
+	replicationResponse := &bft.ReplicationResponse{
+		Data: []bft.QuorumRound{
+			{
+				EmptyNotarization: emptyNotarization,
+			},
+		},
+	}
+	e.HandleMessage(&bft.Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[0])
+
+	require.Never(t, func() bool {
+		return wal.containsEmptyNotarization(0)
+	}, time.Millisecond*500, time.Millisecond*10, "Did not expect an empty notarization with a corrupt QC to be written to the WAL")
+}
+
+func TestReplicationVerifyNotarization(t *testing.T) {
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1), blockShouldBeBuilt: make(chan struct{}, 1)}
+	nodes := []bft.NodeID{{1}, {2}, {3}, {4}}
+
+	// This function takes a QC and makes it that it is signed by only 2 out of 4 nodes,
+	// while still having a quorum of signatures.
+	corruptQC := func(qc bft.QuorumCertificate) bft.QuorumCertificate {
+		badQC := qc.(testQC)
+		// Duplicate the last signature
+		badQC = append(badQC, badQC[len(badQC)-1])
+		// Remove the first signature
+		badQC = badQC[1:]
+
+		// Finalization should have 3 signers
+		require.Len(t, badQC.Signers(), 3)
+
+		// But all these signers are either the second and third node.
+		require.Contains(t, badQC.Signers(), nodes[1])
+		require.Contains(t, badQC.Signers(), nodes[2])
+
+		// Not the first or the fourth node.
+		require.NotContains(t, badQC.Signers(), nodes[0])
+		require.NotContains(t, badQC.Signers(), nodes[3])
+
+		return badQC
+	}
+
+	quorum := bft.Quorum(len(nodes))
+	sentMessages := make(chan *bft.Message, 100)
+	l := testutil.MakeLogger(t, 1)
+	wal := newTestWAL(t)
+	storage := newInMemStorage()
+
+	conf := bft.EpochConfig{
+		MaxProposalWait:     bft.DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[1],
+		Signer:              &testSigner{},
+		WAL:                 wal,
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                &recordingComm{Communication: noopComm(nodes), BroadcastMessages: sentMessages},
+		BlockBuilder:        bb,
+		SignatureAggregator: &testSignatureAggregator{},
+	}
+	conf.ReplicationEnabled = true
+
+	e, err := bft.NewEpoch(conf)
+	require.NoError(t, err)
+	require.NoError(t, e.Start())
+
+	md := e.Metadata()
+	_, ok := bb.BuildBlock(context.Background(), md)
+	require.True(t, ok)
+	require.Equal(t, md.Round, md.Seq)
+
+	block := <-bb.out
+
+	finalization, _ := newFinalizationRecord(t, l, e.SignatureAggregator, block, nodes[0:quorum])
+
+	// Trigger the replication process to start by sending a finalization for a block we do not have
+	e.HandleMessage(&bft.Message{
+		Finalization: &finalization,
+	}, nodes[0])
+
+	// Wait for the replication request to be sent
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+
+	notarization, err := newNotarization(e.Logger, e.SignatureAggregator, block, nodes[0:quorum])
+	require.NoError(t, err)
+
+	// Corrupt the QC
+	notarization.QC = corruptQC(notarization.QC)
+
+	// Respond to the replication request with a block that has a notarization
+	replicationResponse := &bft.ReplicationResponse{
+		Data: []bft.QuorumRound{
+			{
+				Block:        block,
+				Notarization: &notarization,
+			},
+		},
+	}
+	e.HandleMessage(&bft.Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[0])
+
+	require.Never(t, func() bool {
+		return wal.containsNotarization(0)
+	}, time.Millisecond*500, time.Millisecond*10, "Did not expect block with a corrupt QC to be written to the WAL")
 }

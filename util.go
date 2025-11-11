@@ -7,8 +7,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 // RetrieveLastIndexFromStorage retrieves the latest block and finalization from storage.
@@ -49,22 +50,22 @@ func validateFinalizationQC(eligibleSigners map[string]struct{}, finalization *F
 	// Check enough signers signed the finalization
 	if quorumSize > len(finalization.QC.Signers()) {
 		logger.Debug("ToBeSignedFinalization signed by insufficient nodes",
-			zap.Int("count", len(finalization.QC.Signers())),
-			zap.Int("Quorum", quorumSize))
+			log.Int("count", len(finalization.QC.Signers())),
+			log.Int("Quorum", quorumSize))
 		return false
 	}
 
 	doubleSigner, signedTwice := hasSomeNodeSignedTwice(finalization.QC.Signers(), logger)
 
 	if signedTwice {
-		logger.Debug("Finalization signed twice by the same node", zap.Stringer("signer", doubleSigner))
+		logger.Debug("Finalization signed twice by the same node", log.Stringer("signer", doubleSigner))
 		return false
 	}
 
 	// Finally, check that all signers are eligible of signing, and we don't have made up identities
 	for _, signer := range finalization.QC.Signers() {
 		if _, exists := eligibleSigners[string(signer)]; !exists {
-			logger.Debug("Finalization Quorum Certificate contains an unknown signer", zap.Stringer("signer", signer))
+			logger.Debug("Finalization Quorum Certificate contains an unknown signer", log.Stringer("signer", signer))
 			return false
 		}
 	}
@@ -189,7 +190,7 @@ func (block *oneTimeVerifiedBlock) Verify(ctx context.Context) (VerifiedBlock, e
 	}()
 
 	if result, exists := block.otv.digests[digest]; exists {
-		block.otv.logger.Warn("Attempted to verify an already verified block", zap.Uint64("round", header.Round))
+		block.otv.logger.Warn("Attempted to verify an already verified block", log.Uint64("round", header.Round))
 		return result.vb, result.err
 	}
 
@@ -277,4 +278,72 @@ func DistributeSequenceRequests(start, end uint64, numNodes int) []Segment {
 	}
 
 	return segments
+}
+
+type NotarizationTime struct {
+	// config
+	getRound                       func() uint64
+	haveUnFinalizedNotarization    func() (uint64, bool)
+	rebroadcastFinalizationVotes   func()
+	checkInterval                  time.Duration
+	finalizeVoteRebroadcastTimeout time.Duration
+	// state
+	lastSampleTime          time.Time
+	latestRound             uint64
+	lastRebroadcastTime     time.Time
+	oldestNotFinalizedRound uint64
+}
+
+func NewNotarizationTime(
+	finalizeVoteRebroadcastTimeout time.Duration,
+	haveUnFinalizedNotarization func() (uint64, bool),
+	rebroadcastFinalizationVotes func(),
+	getRound func() uint64,
+) NotarizationTime {
+	return NotarizationTime{
+		finalizeVoteRebroadcastTimeout: finalizeVoteRebroadcastTimeout,
+		haveUnFinalizedNotarization:    haveUnFinalizedNotarization,
+		rebroadcastFinalizationVotes:   rebroadcastFinalizationVotes,
+		getRound:                       getRound,
+		checkInterval:                  finalizeVoteRebroadcastTimeout / 3,
+	}
+}
+
+func (nt *NotarizationTime) CheckForNotFinalizedNotarizedBlocks(now time.Time) {
+	// If we have recently checked, don't check again
+	if !nt.lastSampleTime.IsZero() && nt.lastSampleTime.Add(nt.checkInterval).After(now) {
+		return
+	}
+
+	nt.lastSampleTime = now
+
+	round := nt.getRound()
+
+	// As long as we make some progress, we don't check for a round not finalized.
+	if round > nt.latestRound {
+		nt.latestRound = round
+		return
+	}
+
+	// It is only if we didn't advance any round, that we check if we have made some progress in finalizing rounds.
+
+	oldestNotFinalizedRound, haveNotFinalizedRound := nt.haveUnFinalizedNotarization()
+	if !haveNotFinalizedRound {
+		nt.lastRebroadcastTime = time.Time{}
+		nt.oldestNotFinalizedRound = 0
+		return
+	}
+
+	lastRebroadcastTime := nt.lastRebroadcastTime
+	if lastRebroadcastTime.IsZero() {
+		nt.lastRebroadcastTime = now
+		nt.oldestNotFinalizedRound = oldestNotFinalizedRound
+		return
+	}
+
+	if lastRebroadcastTime.Add(nt.finalizeVoteRebroadcastTimeout).Before(now) &&
+		nt.oldestNotFinalizedRound == oldestNotFinalizedRound {
+		nt.rebroadcastFinalizationVotes()
+		nt.lastRebroadcastTime = now
+	}
 }

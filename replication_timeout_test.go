@@ -5,22 +5,26 @@ package bft_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/luxfi/bft"
+	. "github.com/luxfi/bft"
+
+	"github.com/luxfi/bft/testutil"
 
 	"github.com/stretchr/testify/require"
 )
 
-func rejectReplicationRequests(msg *bft.Message, _, _ bft.NodeID) bool {
+func rejectReplicationRequests(msg *Message, _, _ NodeID) bool {
 	return msg.ReplicationRequest == nil && msg.ReplicationResponse == nil && msg.VerifiedReplicationResponse == nil
 }
 
 // A node attempts to request blocks to replicate, but fails to receive them
 func TestReplicationRequestTimeout(t *testing.T) {
-	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
 	numInitialSeqs := uint64(8)
 
 	// node begins replication
@@ -29,7 +33,7 @@ func TestReplicationRequestTimeout(t *testing.T) {
 
 	storageData := createBlocks(t, nodes, &bb.testBlockBuilder, numInitialSeqs)
 
-	newNodeConfig := func(from bft.NodeID) *testNodeConfig {
+	newNodeConfig := func(from NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, rejectReplicationRequests)
 		return &testNodeConfig{
 			initialStorage:     storageData,
@@ -64,10 +68,10 @@ func TestReplicationRequestTimeout(t *testing.T) {
 
 	// after the timeout, the nodes should respond and the lagging node will replicate
 	net.setAllNodesMessageFilter(allowAllMessages)
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout / 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout / 2))
 	require.Equal(t, uint64(0), laggingNode.storage.Height())
 
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
 	laggingNode.storage.waitForBlockCommit(uint64(numInitialSeqs))
 }
 
@@ -77,14 +81,14 @@ type testTimeoutMessageFilter struct {
 	replicationResponses chan struct{}
 }
 
-func (m *testTimeoutMessageFilter) failOnReplicationRequest(msg *bft.Message, _, _ bft.NodeID) bool {
+func (m *testTimeoutMessageFilter) failOnReplicationRequest(msg *Message, _, _ NodeID) bool {
 	require.Nil(m.t, msg.ReplicationRequest)
 	return true
 }
 
 // receiveReplicationRequest is used to filter out sending replication responses, and notify a channel
 // when a replication request is received.
-func (m *testTimeoutMessageFilter) receivedReplicationRequest(msg *bft.Message, _, _ bft.NodeID) bool {
+func (m *testTimeoutMessageFilter) receivedReplicationRequest(msg *Message, _, _ NodeID) bool {
 	if msg.VerifiedReplicationResponse != nil || msg.ReplicationResponse != nil {
 		m.replicationResponses <- struct{}{}
 		return false
@@ -94,7 +98,7 @@ func (m *testTimeoutMessageFilter) receivedReplicationRequest(msg *bft.Message, 
 }
 
 func TestReplicationRequestTimeoutCancels(t *testing.T) {
-	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
 	startSeq := uint64(8)
 
 	bb := newTestControlledBlockBuilder(t)
@@ -130,7 +134,7 @@ func TestReplicationRequestTimeoutCancels(t *testing.T) {
 		t: t,
 	}
 	laggingNode.e.Comm.(*testComm).setFilter(mf.failOnReplicationRequest)
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
 
 	// ensure enough time passes after advanceTime is called
 	bb.triggerNewBlock()
@@ -142,7 +146,7 @@ func TestReplicationRequestTimeoutCancels(t *testing.T) {
 // A node attempts to request blocks to replicate, but fails to
 // receive them multiple times
 func TestReplicationRequestTimeoutMultiple(t *testing.T) {
-	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
 	startSeq := uint64(8)
 
 	// node begins replication
@@ -151,7 +155,7 @@ func TestReplicationRequestTimeoutMultiple(t *testing.T) {
 
 	storageData := createBlocks(t, nodes, &bb.testBlockBuilder, startSeq)
 
-	newNodeConfig := func(from bft.NodeID) *testNodeConfig {
+	newNodeConfig := func(from NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, rejectReplicationRequests)
 		return &testNodeConfig{
 			initialStorage:     storageData,
@@ -196,23 +200,23 @@ func TestReplicationRequestTimeoutMultiple(t *testing.T) {
 	normalNode2.e.Comm.(*testComm).setFilter(allowAllMessages)
 
 	// after the timeout, only normalNode2 should respond
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout / 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout / 2))
 	require.Equal(t, uint64(0), laggingNode.storage.Height())
 
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout))
 	laggingNode.storage.waitForBlockCommit(startSeq / 3)
 
 	net.setAllNodesMessageFilter(allowAllMessages)
 	// timeout again, now all nodes will respond
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
 	laggingNode.storage.waitForBlockCommit(startSeq)
 }
 
 // modifies the replication response to only send every other quorum round
-func incompleteReplicationResponseFilter(msg *bft.Message, _, _ bft.NodeID) bool {
+func incompleteReplicationResponseFilter(msg *Message, _, _ NodeID) bool {
 	if msg.VerifiedReplicationResponse != nil || msg.ReplicationResponse != nil {
 		newLen := len(msg.VerifiedReplicationResponse.Data) / 2
-		newData := make([]bft.VerifiedQuorumRound, 0, newLen)
+		newData := make([]VerifiedQuorumRound, 0, newLen)
 
 		for i := 0; i < newLen; i += 2 {
 			newData = append(newData, msg.VerifiedReplicationResponse.Data[i])
@@ -225,7 +229,7 @@ func incompleteReplicationResponseFilter(msg *bft.Message, _, _ bft.NodeID) bool
 // A node attempts to request blocks to replicate, but receives incomplete
 // responses from nodes.
 func TestReplicationRequestIncompleteResponses(t *testing.T) {
-	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
 	startSeq := uint64(8)
 
 	// node begins replication
@@ -234,7 +238,7 @@ func TestReplicationRequestIncompleteResponses(t *testing.T) {
 
 	storageData := createBlocks(t, nodes, &bb.testBlockBuilder, startSeq)
 
-	newNodeConfig := func(from bft.NodeID) *testNodeConfig {
+	newNodeConfig := func(from NodeID) *testNodeConfig {
 		comm := newTestComm(from, net, rejectReplicationRequests)
 		return &testNodeConfig{
 			initialStorage:     storageData,
@@ -279,27 +283,27 @@ func TestReplicationRequestIncompleteResponses(t *testing.T) {
 	net.setAllNodesMessageFilter(incompleteReplicationResponseFilter)
 
 	// after the timeout, only normalNode2 should respond(but with incomplete data)
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout / 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout / 2))
 	require.Equal(t, uint64(0), laggingNode.storage.Height())
 
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout))
 	laggingNode.storage.waitForBlockCommit(0)
 
 	net.setAllNodesMessageFilter(allowAllMessages)
 	// timeout again, now all nodes will respond
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
 	laggingNode.storage.waitForBlockCommit(startSeq)
 }
 
 type collectNotarizationComm struct {
 	lock          *sync.Mutex
-	notarizations map[uint64]*bft.Notarization
+	notarizations map[uint64]*Notarization
 	testNetworkCommunication
 
 	replicationResponses chan struct{}
 }
 
-func newCollectNotarizationComm(nodeID bft.NodeID, net *inMemNetwork, notarizations map[uint64]*bft.Notarization, lock *sync.Mutex) *collectNotarizationComm {
+func newCollectNotarizationComm(nodeID NodeID, net *inMemNetwork, notarizations map[uint64]*Notarization, lock *sync.Mutex) *collectNotarizationComm {
 	return &collectNotarizationComm{
 		notarizations:            notarizations,
 		testNetworkCommunication: newTestComm(nodeID, net, allowAllMessages),
@@ -308,7 +312,7 @@ func newCollectNotarizationComm(nodeID bft.NodeID, net *inMemNetwork, notarizati
 	}
 }
 
-func (c *collectNotarizationComm) Send(msg *bft.Message, to bft.NodeID) {
+func (c *collectNotarizationComm) Send(msg *Message, to NodeID) {
 	if msg.Notarization != nil {
 		c.lock.Lock()
 		c.notarizations[msg.Notarization.Vote.Round] = msg.Notarization
@@ -317,7 +321,7 @@ func (c *collectNotarizationComm) Send(msg *bft.Message, to bft.NodeID) {
 	c.testNetworkCommunication.Send(msg, to)
 }
 
-func (c *collectNotarizationComm) Broadcast(msg *bft.Message) {
+func (c *collectNotarizationComm) Broadcast(msg *Message) {
 	if msg.Notarization != nil {
 		c.lock.Lock()
 		c.notarizations[msg.Notarization.Vote.Round] = msg.Notarization
@@ -326,9 +330,9 @@ func (c *collectNotarizationComm) Broadcast(msg *bft.Message) {
 	c.testNetworkCommunication.Broadcast(msg)
 }
 
-func (c *collectNotarizationComm) removeFinalizationsFromReplicationResponses(msg *bft.Message, from, to bft.NodeID) bool {
+func (c *collectNotarizationComm) removeFinalizationsFromReplicationResponses(msg *Message, from, to NodeID) bool {
 	if msg.VerifiedReplicationResponse != nil || msg.ReplicationResponse != nil {
-		newData := make([]bft.VerifiedQuorumRound, 0, len(msg.VerifiedReplicationResponse.Data))
+		newData := make([]VerifiedQuorumRound, 0, len(msg.VerifiedReplicationResponse.Data))
 
 		for i := 0; i < len(msg.VerifiedReplicationResponse.Data); i++ {
 			qr := msg.VerifiedReplicationResponse.Data[i]
@@ -347,15 +351,15 @@ func (c *collectNotarizationComm) removeFinalizationsFromReplicationResponses(ms
 // TestReplicationRequestWithoutFinalization tests that a replication request is not marked as completed
 // if we are expecting a finalization but it is not present in the response.
 func TestReplicationRequestWithoutFinalization(t *testing.T) {
-	nodes := []bft.NodeID{{1}, {2}, {3}, []byte("lagging")}
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
 	endDisconnect := uint64(10)
 	bb := newTestControlledBlockBuilder(t)
 	laggingBb := newTestControlledBlockBuilder(t)
 	net := newInMemNetwork(t, nodes)
 
-	notarizations := make(map[uint64]*bft.Notarization)
+	notarizations := make(map[uint64]*Notarization)
 	mapLock := &sync.Mutex{}
-	testConfig := func(nodeID bft.NodeID) *testNodeConfig {
+	testConfig := func(nodeID NodeID) *testNodeConfig {
 		return &testNodeConfig{
 			replicationEnabled: true,
 			comm:               newCollectNotarizationComm(nodeID, net, notarizations, mapLock),
@@ -382,7 +386,7 @@ func TestReplicationRequestWithoutFinalization(t *testing.T) {
 	missedSeqs := uint64(0)
 	// normal nodes continue to make progress
 	for i := uint64(0); i < endDisconnect; i++ {
-		emptyRound := bytes.Equal(bft.LeaderForRound(nodes, i), nodes[3])
+		emptyRound := bytes.Equal(LeaderForRound(nodes, i), nodes[3])
 		if emptyRound {
 			advanceWithoutLeader(t, net, bb, epochTimes, i, laggingNode.e.ID)
 			missedSeqs++
@@ -419,7 +423,7 @@ func TestReplicationRequestWithoutFinalization(t *testing.T) {
 	require.Equal(t, uint64(0), laggingNode.storage.Height())
 
 	// we should still have these replication requests in the timeout handler
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 2))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
 
 	for range net.instances[:3] {
 		// the lagging node should have sent replication requests
@@ -431,6 +435,192 @@ func TestReplicationRequestWithoutFinalization(t *testing.T) {
 	// We should still have these replication requests in the timeout handler
 	// but now we allow the lagging node to process them
 	net.setAllNodesMessageFilter(allowAllMessages)
-	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(bft.DefaultReplicationRequestTimeout * 4))
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 4))
 	laggingNode.storage.waitForBlockCommit(endDisconnect - missedSeqs)
+}
+
+// TestReplicationMalformedQuorumRound tests that a node re-sends a replication request when it receives a malformed quorum round message.
+func TestReplicationMalformedQuorumRound(t *testing.T) {
+	nodes := []NodeID{{1}, {2}, {3}, []byte("lagging")}
+	startSeq := uint64(8)
+
+	// node begins replication
+	bb := newTestControlledBlockBuilder(t)
+	net := newInMemNetwork(t, nodes)
+
+	storageData := createBlocks(t, nodes, &bb.testBlockBuilder, startSeq)
+
+	newNodeConfig := func(from NodeID) *testNodeConfig {
+		comm := newTestComm(from, net, rejectReplicationRequests)
+		return &testNodeConfig{
+			initialStorage:     storageData,
+			comm:               comm,
+			replicationEnabled: true,
+		}
+	}
+
+	mf := &testTimeoutMessageFilter{
+		t:                    t,
+		replicationResponses: make(chan struct{}, 1),
+	}
+
+	newBFTNode(t, nodes[0], net, bb, newNodeConfig(nodes[0]))
+	normalNode2 := newBFTNode(t, nodes[1], net, bb, newNodeConfig(nodes[1]))
+	normalNode2.e.Comm.(*testComm).setFilter(mf.receivedReplicationRequest)
+	newBFTNode(t, nodes[2], net, bb, newNodeConfig(nodes[2]))
+
+	recordedMessages := make(chan *Message, 1000)
+	comm := newTestComm(nodes[3], net, allowAllMessages)
+
+	laggingNode := newBFTNode(t, nodes[3], net, bb, &testNodeConfig{
+		replicationEnabled: true,
+		comm:               &recordingComm{Communication: comm, SentMessages: recordedMessages},
+	})
+
+	net.startInstances()
+	bb.triggerNewBlock()
+
+	// typically the lagging node would catch up here, but since we block
+	// replication requests, the lagging node will be forced to resend requests after a timeout
+	for i := 0; i <= int(startSeq); i++ {
+		for _, n := range net.instances {
+			if n.e.ID.Equals(laggingNode.e.ID) {
+				continue
+			}
+			n.storage.waitForBlockCommit(uint64(startSeq))
+		}
+	}
+
+	<-mf.replicationResponses
+
+	// assert the lagging node has not received any replication responses
+	require.Equal(t, uint64(0), laggingNode.storage.Height())
+	net.setAllNodesMessageFilter(
+		func(msg *Message, _, _ NodeID) bool {
+			if msg.VerifiedReplicationResponse != nil || msg.ReplicationResponse != nil {
+				newData := make([]VerifiedQuorumRound, 0, len(msg.VerifiedReplicationResponse.Data))
+
+				for _, qr := range msg.VerifiedReplicationResponse.Data {
+					qr.Notarization = nil // remove notarization
+					qr.Finalization = nil // remove finalization
+					newData = append(newData, qr)
+				}
+				msg.VerifiedReplicationResponse.Data = newData
+			}
+			return true
+		},
+	)
+
+	// after the timeout, only normalNode2 should respond, but with malformed data
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout / 2))
+	require.Equal(t, uint64(0), laggingNode.storage.Height())
+
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout))
+	require.Equal(t, uint64(0), laggingNode.storage.Height())
+
+	require.Eventually(t, func() bool {
+		select {
+		case msg := <-recordedMessages:
+			if msg.ReplicationRequest == nil {
+				return false
+			}
+			// Check if the request contains the expected sequences
+			if len(msg.ReplicationRequest.Seqs) == 3 &&
+				msg.ReplicationRequest.Seqs[0] == 3 &&
+				msg.ReplicationRequest.Seqs[1] == 4 &&
+				msg.ReplicationRequest.Seqs[2] == 5 {
+				return true
+			}
+			return false
+		default:
+			return false
+		}
+	}, 30*time.Second, 10*time.Millisecond)
+
+	net.setAllNodesMessageFilter(allowAllMessages)
+	// timeout again, now all nodes will respond
+	laggingNode.e.AdvanceTime(laggingNode.e.StartTime.Add(DefaultReplicationRequestTimeout * 2))
+	laggingNode.storage.waitForBlockCommit(startSeq)
+}
+
+func TestReplicationResendsFinalizedBlocksThatFailedVerification(t *testing.T) {
+	// send a block, then simultaneously send a finalization for the block
+	l := testutil.MakeLogger(t, 1)
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
+
+	nodes := []NodeID{{1}, {2}, {3}, {4}}
+	quorum := Quorum(len(nodes))
+	sentMessages := make(chan *Message, 100)
+
+	comm := &recordingComm{Communication: noopComm(nodes), SentMessages: sentMessages}
+	epochConfig := defaultTestNodeEpochConfig(t, nodes[1], comm, bb)
+	epochConfig.ReplicationEnabled = true
+
+	storage := epochConfig.Storage.(*InMemStorage)
+
+	e, err := NewEpoch(epochConfig)
+	require.NoError(t, err)
+	require.NoError(t, e.Start())
+
+	md := e.Metadata()
+	_, ok := bb.BuildBlock(context.Background(), md)
+	require.True(t, ok)
+	require.Equal(t, md.Round, md.Seq)
+
+	block := <-bb.out
+	block.verificationError = errors.New("block verification failed")
+
+	finalization, _ := newFinalizationRecord(t, l, e.SignatureAggregator, block, nodes[0:quorum])
+
+	// send the finalization to start the replication process
+	e.HandleMessage(&Message{
+		Finalization: &finalization,
+	}, nodes[0])
+	// wait for the replication request to be sent
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+	replicationResponse := &ReplicationResponse{
+		Data: []QuorumRound{
+			{
+				Block:        block,
+				Finalization: &finalization,
+			},
+		},
+	}
+	e.HandleMessage(&Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[0])
+	// wait for the replication request to be sent again
+	for {
+		msg := <-sentMessages
+		if msg.ReplicationRequest != nil {
+			break
+		}
+	}
+
+	block = newTestBlock(md)
+	block.data = append(block.data, 0)
+	block.computeDigest()
+
+	finalization, _ = newFinalizationRecord(t, l, e.SignatureAggregator, block, nodes[0:quorum])
+	replicationResponse = &ReplicationResponse{
+		Data: []QuorumRound{
+			{
+				Block:        block,
+				Finalization: &finalization,
+			},
+		},
+	}
+
+	e.HandleMessage(&Message{
+		ReplicationResponse: replicationResponse,
+	}, nodes[0])
+
+	storedBlock := storage.waitForBlockCommit(0)
+	require.Equal(t, uint64(1), storage.Height())
+	require.Equal(t, block, storedBlock)
 }

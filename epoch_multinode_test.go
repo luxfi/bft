@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -718,3 +719,159 @@ func (t *testControlledBlockBuilder) BuildBlock(ctx context.Context, metadata Pr
 	<-t.control
 	return t.testBlockBuilder.BuildBlock(ctx, metadata)
 }
+
+// waitToEnterRoundMultinode waits for an epoch to reach a specific round
+func waitToEnterRoundMultinode(t *testing.T, e *Epoch, round uint64) {
+	timeout := time.NewTimer(time.Minute)
+	defer timeout.Stop()
+
+	for {
+		if e.Metadata().Round >= round {
+			return
+		}
+
+		select {
+		case <-time.After(time.Millisecond * 10):
+			continue
+		case <-timeout.C:
+			require.Fail(t, "timed out waiting to enter round", "current round %d, waiting for round %d", e.Metadata().Round, round)
+		}
+	}
+}
+
+// triggerLeaderBlockBuilder triggers the block builder for the leader of a specific round
+func (n *inMemNetwork) triggerLeaderBlockBuilder(bb *testControlledBlockBuilder, round uint64) {
+	leader := LeaderForRound(n.nodes, round)
+	for _, instance := range n.instances {
+		if !instance.e.ID.Equals(leader) {
+			continue
+		}
+		if n.IsDisconnected(leader) {
+			// Log that we're triggering a disconnected leader
+			_ = leader // silence unused variable warning if logging is disabled
+		}
+
+		// wait for the node to enter the round we expect it to propose a block for
+		// otherwise we may trigger a build block too early
+		waitToEnterRoundMultinode(n.t, instance.e, round)
+
+		bb.triggerNewBlock()
+		return
+	}
+
+	// we should always find the leader
+	require.Fail(n.t, "leader not found")
+}
+
+func TestBFTRebroadcastFinalizationVotes(t *testing.T) {
+	bb := newTestControlledBlockBuilder(t)
+
+	nodes := []NodeID{{1}, {2}, {3}, {4}}
+	net := newInMemNetwork(t, nodes)
+
+	var allowFinalizeVotes atomic.Bool
+
+	var numFinalizeVotesSent atomic.Uint32
+
+	config := func(from NodeID) *testNodeConfig {
+		return &testNodeConfig{
+			comm: newTestComm(from, net, func(msg *Message, from NodeID, to NodeID) bool {
+				if msg.Finalization != nil && !allowFinalizeVotes.Load() {
+					return false
+				}
+				if allowFinalizeVotes.Load() && msg.FinalizeVote != nil {
+					numFinalizeVotesSent.Add(1)
+				}
+				return allowFinalizeVotes.Load() || msg.FinalizeVote == nil
+			}),
+		}
+	}
+
+	newBFTNode(t, nodes[0], net, bb, config(nodes[0]))
+	newBFTNode(t, nodes[1], net, bb, config(nodes[1]))
+	newBFTNode(t, nodes[2], net, bb, config(nodes[2]))
+	newBFTNode(t, nodes[3], net, bb, config(nodes[3]))
+
+	net.startInstances()
+
+	lastSeq := uint64(9)
+
+	for seq := uint64(0); seq <= lastSeq; seq++ {
+		for _, n := range net.instances {
+			waitToEnterRoundMultinode(t, n.e, seq)
+		}
+		net.triggerLeaderBlockBuilder(bb, seq)
+		for _, n := range net.instances {
+			n.wal.assertNotarization(seq)
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(net.instances))
+
+	for _, n := range net.instances {
+		go func(n *testNode) {
+			defer wg.Done()
+			n.storage.ensureNoBlockCommit(t, 0)
+		}(n)
+	}
+
+	wg.Wait()
+
+	allowFinalizeVotes.Store(true)
+
+	require.Eventually(t, func() bool {
+		var allHaveFinalized bool = true
+		for _, n := range net.instances {
+			if n.storage.Height() < lastSeq+1 {
+				allHaveFinalized = false
+				break
+			}
+		}
+
+		if allHaveFinalized {
+			return true
+		}
+
+		for _, n := range net.instances {
+			n.e.AdvanceTime(n.e.StartTime.Add(DefaultEmptyVoteRebroadcastTimeout / 3))
+		}
+
+		return false
+
+	}, time.Second*10, time.Millisecond*100)
+
+	// Close the recorded messages channel. A message sent to this channel will cause a panic.
+	finalizeVoteSentCount := numFinalizeVotesSent.Load()
+
+	// Advance the time to make sure we do not continue to send finalize votes.
+	for _, n := range net.instances {
+		n.e.AdvanceTime(n.e.StartTime.Add(DefaultEmptyVoteRebroadcastTimeout * 2))
+		n.e.AdvanceTime(n.e.StartTime.Add(DefaultEmptyVoteRebroadcastTimeout * 2))
+		n.e.AdvanceTime(n.e.StartTime.Add(DefaultEmptyVoteRebroadcastTimeout * 2))
+	}
+
+	require.Equal(t, finalizeVoteSentCount, numFinalizeVotesSent.Load(), "no more finalize votes should have been sent")
+
+	// Next, we run the nodes and notarize 100 blocks, and ensure that less than 400 finalize votes were sent.
+	previousVoteSentCount := finalizeVoteSentCount // We copy the value just to give it a better name.
+	for seq := lastSeq + 1; seq < lastSeq+101; seq++ {
+		for _, n := range net.instances {
+			waitToEnterRoundMultinode(t, n.e, seq)
+		}
+		net.triggerLeaderBlockBuilder(bb, seq)
+		for _, n := range net.instances {
+			n.storage.waitForBlockCommit(seq)
+			n.e.AdvanceTime(n.e.StartTime.Add(DefaultEmptyVoteRebroadcastTimeout))
+		}
+	}
+
+	require.LessOrEqual(t, previousVoteSentCount+400, numFinalizeVotesSent.Load())
+
+}
+
+// TestBFTMultiNodeBlacklist is not yet fully ported due to differences in how
+// blacklist information is accessed in the Lux BFT implementation vs Ava Simplex.
+// The test requires the ability to retrieve blacklist information from committed blocks,
+// which needs to be implemented in the test infrastructure.
+// TODO: Complete porting once block.Blacklist() method is properly implemented.

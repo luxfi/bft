@@ -15,6 +15,7 @@ import (
 	rand2 "math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
+	
 	"go.uber.org/zap/zapcore"
 )
 
@@ -1126,6 +1128,174 @@ func TestEpochBlockTooHighRound(t *testing.T) {
 	})
 }
 
+func TestBlockNotVerifiedIfParentNotNotarized(t *testing.T) {
+	l := testutil.MakeLogger(t, 1)
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
+
+	nodes := []NodeID{{1}, {2}, {3}, {4}}
+
+	storage := newInMemStorage()
+	wal := newTestWAL(t)
+	conf := EpochConfig{
+		MaxProposalWait:     DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[3],
+		Signer:              &testSigner{},
+		WAL:                 wal,
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                noopComm(nodes),
+		BlockBuilder:        bb,
+		SignatureAggregator: &testSignatureAggregator{},
+	}
+
+	e, err := NewEpoch(conf)
+	require.NoError(t, err)
+
+	require.NoError(t, e.Start())
+
+	blocks := createBlocks(t, nodes, bb, 2)
+
+	var block1Verified atomic.Bool
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	block0 := blocks[0].VerifiedBlock.(*testBlock)
+	block0.onVerify = func() {
+		wg.Done()
+	}
+	block1 := blocks[1].VerifiedBlock.(*testBlock)
+	block1.onVerify = func() {
+		block1Verified.Store(true)
+	}
+
+	v0, err := newTestVote(block0, nodes[0])
+	require.NoError(t, err)
+
+	v1, err := newTestVote(block1, nodes[1])
+	require.NoError(t, err)
+
+	emptyNotarization := newEmptyNotarization(nodes, 0, 0)
+
+	err = e.HandleMessage(&Message{
+		BlockMessage: &BlockMessage{
+			Vote:  *v0,
+			Block: block0,
+		},
+	}, nodes[0])
+	require.NoError(t, err)
+
+	wg.Wait()
+
+	err = e.HandleMessage(&Message{
+		BlockMessage: &BlockMessage{
+			Vote:  *v1,
+			Block: block1,
+		},
+	}, nodes[1])
+	require.NoError(t, err)
+
+	err = e.HandleMessage(&Message{
+		EmptyNotarization: emptyNotarization,
+	}, nodes[1])
+	require.NoError(t, err)
+
+	require.Never(t, func() bool {
+		return block1Verified.Load()
+	}, time.Second, 100*time.Millisecond)
+}
+
+func TestEpochVotesForEquivocatedVotes(t *testing.T) {
+	l := testutil.MakeLogger(t, 1)
+	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
+
+	nodes := []NodeID{{1}, {2}, {3}, {4}}
+	recordedMessages := make(chan *Message, 100)
+	comm := &recordingComm{Communication: noopComm(nodes), BroadcastMessages: recordedMessages}
+
+	storage := newInMemStorage()
+	wal := newTestWAL(t)
+	conf := EpochConfig{
+		MaxProposalWait:     DefaultMaxProposalWaitTime,
+		Logger:              l,
+		ID:                  nodes[3],
+		Signer:              &testSigner{},
+		WAL:                 wal,
+		Verifier:            &testVerifier{},
+		Storage:             storage,
+		Comm:                comm,
+		BlockBuilder:        bb,
+		SignatureAggregator: &testSignatureAggregator{},
+	}
+
+	e, err := NewEpoch(conf)
+	require.NoError(t, err)
+
+	require.NoError(t, e.Start())
+
+	md := e.Metadata()
+	_, ok := bb.BuildBlock(context.Background(), md)
+	require.True(t, ok)
+
+	block := <-bb.out
+
+	// the leader and this node are sending the votes for the same block
+	leader := nodes[0]
+	vote, err := newTestVote(block, leader)
+	require.NoError(t, err)
+
+	err = e.HandleMessage(&Message{
+		BlockMessage: &BlockMessage{
+			Vote:  *vote,
+			Block: block,
+		},
+	}, leader)
+	require.NoError(t, err)
+
+	// node 1 sends a vote for a different block
+	equivocatedBlock := newTestBlock(block.metadata)
+	equivocatedBlock.data = []byte{1, 2, 3}
+	equivocatedBlock.computeDigest()
+	injectTestVote(t, e, equivocatedBlock, nodes[1])
+	eqbh := equivocatedBlock.BlockHeader()
+
+	// We should not have sent a notarization yet, since we have not received enough votes for the block we received from the leader
+	require.Never(t, func() bool {
+		select {
+		case msg := <-recordedMessages:
+			if msg.Notarization != nil {
+				fmt.Println(msg.Notarization.Vote.BlockHeader.Equals(&eqbh))
+				return true
+			}
+		default:
+			return false
+		}
+		return false
+	}, time.Millisecond*500, time.Millisecond*100)
+
+	// node 2 sends a vote for the same block as the leader
+	injectTestVote(t, e, block, nodes[2])
+
+	// Wait for the notarization to be sent
+	timeout := time.After(time.Minute)
+	var notarization *Notarization
+	for notarization == nil {
+		select {
+		case msg := <-recordedMessages:
+			if msg.Notarization != nil {
+				notarization = msg.Notarization
+			}
+		case <-timeout:
+			require.Fail(t, "timed out waiting for notarization")
+		}
+	}
+
+	for _, signer := range notarization.QC.(testQC).Signers() {
+		require.NotEqual(t, nodes[1], signer, "Node 1 should not be in the notarization QC")
+	}
+}
+
 // TestMetadataProposedRound ensures the metadata only builds off blocks
 // with finalizations or notarizations
 func TestMetadataProposedRound(t *testing.T) {
@@ -1161,6 +1331,28 @@ func TestMetadataProposedRound(t *testing.T) {
 type AnyBlock interface {
 	// BlockHeader encodes a succinct and collision-free representation of a block.
 	BlockHeader() BlockHeader
+}
+
+func newEmptyNotarization(nodes []NodeID, round uint64, seq uint64) *EmptyNotarization {
+	return testutil.NewEmptyNotarization(nodes, round, seq)
+}
+
+func waitToEnterRound(t *testing.T, e *Epoch, round uint64) {
+	timeout := time.NewTimer(time.Minute)
+	defer timeout.Stop()
+
+	for {
+		if e.Metadata().Round >= round {
+			return
+		}
+
+		select {
+		case <-time.After(time.Millisecond * 10):
+			continue
+		case <-timeout.C:
+			require.Fail(t, "timed out waiting to enter round", "current round %d, waiting for round %d", e.Metadata().Round, round)
+		}
+	}
 }
 
 func newTestVote(block AnyBlock, id NodeID) (*Vote, error) {
@@ -1354,6 +1546,7 @@ type testBlock struct {
 	digest            [32]byte
 	onVerify          func()
 	verificationDelay chan struct{}
+	verificationError error
 }
 
 func (tb *testBlock) Verify(context.Context) (VerifiedBlock, error) {
@@ -1362,11 +1555,13 @@ func (tb *testBlock) Verify(context.Context) (VerifiedBlock, error) {
 			tb.onVerify()
 		}
 	}()
-	if tb.verificationDelay == nil {
-		return tb, nil
+	if tb.verificationDelay != nil {
+		<-tb.verificationDelay
 	}
-
-	<-tb.verificationDelay
+	
+	if tb.verificationError != nil {
+		return nil, tb.verificationError
+	}
 
 	return tb, nil
 }

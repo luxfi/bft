@@ -6,31 +6,31 @@ package bft
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 type Logger interface {
 	// Log that a fatal error has occurred. The program should likely exit soon
 	// after this is called
-	Fatal(msg string, fields ...zap.Field)
+	Fatal(msg string, fields ...log.Field)
 	// Log that an error has occurred. The program should be able to recover
 	// from this error
-	Error(msg string, fields ...zap.Field)
+	Error(msg string, fields ...log.Field)
 	// Log that an event has occurred that may indicate a future error or
 	// vulnerability
-	Warn(msg string, fields ...zap.Field)
+	Warn(msg string, fields ...log.Field)
 	// Log an event that may be useful for a user to see to measure the progress
 	// of the protocol
-	Info(msg string, fields ...zap.Field)
+	Info(msg string, fields ...log.Field)
 	// Log an event that may be useful for understanding the order of the
 	// execution of the protocol
-	Trace(msg string, fields ...zap.Field)
+	Trace(msg string, fields ...log.Field)
 	// Log an event that may be useful for a programmer to see when debuging the
 	// execution of the protocol
-	Debug(msg string, fields ...zap.Field)
+	Debug(msg string, fields ...log.Field)
 	// Log extremely detailed events that can be useful for inspecting every
 	// aspect of the program
-	Verbo(msg string, fields ...zap.Field)
+	Verbo(msg string, fields ...log.Field)
 }
 
 type BlockBuilder interface {

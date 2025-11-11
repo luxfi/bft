@@ -10,10 +10,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/luxfi/bft/testutil"
+	"github.com/luxfi/log"
 
 	"github.com/stretchr/testify/require"
 )
+
+type noOpLogger struct{}
+
+func (n *noOpLogger) Trace(string, ...log.Field) {}
+func (n *noOpLogger) Debug(string, ...log.Field) {}
+func (n *noOpLogger) Info(string, ...log.Field)  {}
+func (n *noOpLogger) Warn(string, ...log.Field)  {}
+func (n *noOpLogger) Error(string, ...log.Field) {}
+func (n *noOpLogger) Fatal(string, ...log.Field) {}
+func (n *noOpLogger) Verbo(string, ...log.Field) {}
 
 func TestDependencyTree(t *testing.T) {
 	dt := newDependencies()
@@ -36,7 +46,7 @@ func TestDependencyTree(t *testing.T) {
 
 func TestAsyncScheduler(t *testing.T) {
 	t.Run("Executes asynchronously", func(t *testing.T) {
-		as := NewScheduler(testutil.MakeLogger(t))
+		as := NewScheduler(&noOpLogger{})
 		defer as.Close()
 
 		ticks := make(chan struct{})
@@ -58,7 +68,7 @@ func TestAsyncScheduler(t *testing.T) {
 	})
 
 	t.Run("Does not execute when closed", func(t *testing.T) {
-		as := NewScheduler(testutil.MakeLogger(t))
+		as := NewScheduler(&noOpLogger{})
 		ticks := make(chan struct{}, 1)
 
 		as.Close()
@@ -75,7 +85,7 @@ func TestAsyncScheduler(t *testing.T) {
 	})
 
 	t.Run("Executes several pending tasks concurrently in arbitrary order", func(t *testing.T) {
-		as := NewScheduler(testutil.MakeLogger(t))
+		as := NewScheduler(&noOpLogger{})
 		defer as.Close()
 
 		n := 9000

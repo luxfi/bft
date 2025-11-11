@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luxfi/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -29,11 +30,11 @@ func (t *TestLogger) Silence() {
 	t.traceVerboseLogger = zap.New(core, zap.AddCaller(), zap.IncreaseLevel(atomicLevel))
 }
 
-func (tl *TestLogger) Trace(msg string, fields ...zap.Field) {
+func (tl *TestLogger) Trace(msg string, fields ...log.Field) {
 	tl.traceVerboseLogger.Log(zapcore.DebugLevel, msg, fields...)
 }
 
-func (tl *TestLogger) Verbo(msg string, fields ...zap.Field) {
+func (tl *TestLogger) Verbo(msg string, fields ...log.Field) {
 	tl.traceVerboseLogger.Log(zapcore.DebugLevel, msg, fields...)
 }
 
@@ -61,16 +62,16 @@ func MakeLogger(t *testing.T, node ...int) *TestLogger {
 	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), atomicLevel)
 
 	logger := zap.New(core, zap.AddCaller())
-	logger = logger.With(zap.String("test", t.Name()))
+	logger = logger.With(log.String("test", t.Name()))
 	if len(node) > 0 {
-		logger = logger.With(zap.Int("node", node[0]))
+		logger = logger.With(log.Int("node", node[0]))
 	}
 
 	traceVerboseLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-	traceVerboseLogger = traceVerboseLogger.With(zap.String("test", t.Name()))
+	traceVerboseLogger = traceVerboseLogger.With(log.String("test", t.Name()))
 
 	if len(node) > 0 {
-		traceVerboseLogger = traceVerboseLogger.With(zap.Int("node", node[0]))
+		traceVerboseLogger = traceVerboseLogger.With(log.Int("node", node[0]))
 	}
 
 	l := &TestLogger{Logger: logger, traceVerboseLogger: traceVerboseLogger}

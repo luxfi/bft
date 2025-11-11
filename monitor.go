@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 type Monitor struct {
@@ -50,7 +50,7 @@ func (m *Monitor) AdvanceTime(t time.Time) {
 }
 
 func (m *Monitor) tick(now time.Time, taskID uint64) {
-	defer m.logger.Verbo("Ticked", zap.Uint64("taskID", taskID), zap.Time("time", now))
+	defer m.logger.Verbo("Ticked", log.Uint64("taskID", taskID), log.Time("time", now))
 	ft := m.futureTask.Load()
 	if ft == nil {
 		return
@@ -62,9 +62,9 @@ func (m *Monitor) tick(now time.Time, taskID uint64) {
 		return
 	}
 
-	m.logger.Verbo("Executing f", zap.Uint64("taskID", taskID), zap.Time("deadline", task.deadline))
+	m.logger.Verbo("Executing f", log.Uint64("taskID", taskID), log.Time("deadline", task.deadline))
 	task.f()
-	m.logger.Verbo("Executed f", zap.Uint64("taskID", taskID), zap.Time("time", now), zap.Time("deadline", task.deadline))
+	m.logger.Verbo("Executed f", log.Uint64("taskID", taskID), log.Time("time", now), log.Time("deadline", task.deadline))
 
 	// clean up future task to mark we have already executed it and to release memory
 	m.futureTask.Store(&futureTask{})
@@ -77,9 +77,9 @@ func (m *Monitor) run() {
 		case tick := <-m.ticks:
 			m.tick(tick, taskID)
 		case f := <-m.tasks:
-			m.logger.Verbo("Executing f", zap.Uint64("taskID", taskID))
+			m.logger.Verbo("Executing f", log.Uint64("taskID", taskID))
 			f()
-			m.logger.Verbo("Task executed", zap.Uint64("taskID", taskID))
+			m.logger.Verbo("Task executed", log.Uint64("taskID", taskID))
 		}
 		taskID++
 	}
@@ -148,5 +148,5 @@ func (m *Monitor) FutureTask(timeout time.Duration, f func()) {
 		deadline: time.Add(timeout),
 	})
 
-	m.logger.Verbo("Scheduling task", zap.Duration("timeout", timeout), zap.Time("deadline", time))
+	m.logger.Verbo("Scheduling task", log.Duration("timeout", timeout), log.Time("deadline", time))
 }

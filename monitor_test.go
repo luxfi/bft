@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/luxfi/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -120,11 +121,11 @@ type testLogger struct {
 	*zap.Logger
 }
 
-func (tl *testLogger) Trace(msg string, fields ...zap.Field) {
+func (tl *testLogger) Trace(msg string, fields ...log.Field) {
 	tl.Log(zapcore.DebugLevel, msg, fields...)
 }
 
-func (tl *testLogger) Verbo(msg string, fields ...zap.Field) {
+func (tl *testLogger) Verbo(msg string, fields ...log.Field) {
 	tl.Log(zapcore.DebugLevel, msg, fields...)
 }
 
