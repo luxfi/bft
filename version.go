@@ -12,8 +12,8 @@ const (
 	VersionMinor = 1
 
 	// Patch version component of the current release
-	VersionPatch = 1
+	VersionPatch = 2
 
 	// Version string of the current release
-	Version = "v0.1.1"
+	Version = "v0.1.2"
 )

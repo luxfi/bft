@@ -3,7 +3,7 @@
 **Last Updated**: 2025-11-11
 **Project**: BFT Consensus Engine
 **Organization**: Lux Industries, Inc.
-**Version**: v0.1.1
+**Version**: v0.1.2
 
 ## Project Overview
 
@@ -80,7 +80,13 @@ go test -cover ./...
 - Table-driven tests for blacklist logic
 - Mock implementations for testing (testutil package)
 
-### Recent Changes (v0.1.1)
+### Recent Changes (v0.1.2)
+- Removed all Avalanche/AVAX branding and references
+- Properly attributed Simplex consensus protocol (research paper)
+- Updated documentation to reflect Lux Network implementation
+- Ensured zero ava-labs package dependencies
+
+### Previous Changes (v0.1.1)
 - Migrated from `go.uber.org/zap` to `github.com/luxfi/log`
 - Ported additional test cases from upstream
 - Fixed nil pointer bugs and circular imports

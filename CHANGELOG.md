@@ -5,6 +5,22 @@ All notable changes to the Lux BFT consensus implementation will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.2] - 2025-11-11
+
+### Changed
+- **[BREAKING]** Removed all Avalanche branding and references
+  - Updated README.md to properly attribute Simplex consensus protocol
+  - Noted implementation is used by Lux Network
+  - Linked to original Simplex research paper (https://eprint.iacr.org/2023/463)
+  - Removed all AVAX/Avax references
+  - Ensured no ava-labs package dependencies remain
+
+### Documentation
+- Complete rewrite of README.md with proper attribution
+- Clear distinction between Simplex protocol (research) and Lux implementation
+- Acknowledgment of academic peer review (TCC 2023)
+- Updated all documentation to reflect Lux Network usage
+
 ## [v0.1.1] - 2025-11-11
 
 ### Changed
