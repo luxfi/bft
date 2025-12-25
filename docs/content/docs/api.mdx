@@ -1,0 +1,742 @@
+---
+title: API Reference
+description: Complete API documentation for BFT consensus interfaces and types
+---
+
+# API Reference
+
+Complete reference for all public APIs, interfaces, and types in the BFT consensus engine.
+
+## Core Interfaces
+
+### Logger
+
+Structured logging interface with multiple severity levels.
+
+```go
+type Logger interface {
+    Fatal(msg string, fields ...log.Field)
+    Error(msg string, fields ...log.Field)
+    Warn(msg string, fields ...log.Field)
+    Info(msg string, fields ...log.Field)
+    Trace(msg string, fields ...log.Field)
+    Debug(msg string, fields ...log.Field)
+    Verbo(msg string, fields ...log.Field)
+}
+```
+
+#### Methods
+
+##### `Fatal(msg string, fields ...log.Field)`
+Log a fatal error. The program should exit after this call.
+- **msg**: Error message
+- **fields**: Structured logging fields
+
+##### `Error(msg string, fields ...log.Field)`
+Log a recoverable error.
+- **msg**: Error message
+- **fields**: Structured logging fields
+
+##### `Warn(msg string, fields ...log.Field)`
+Log a warning that may indicate future issues.
+- **msg**: Warning message
+- **fields**: Structured logging fields
+
+##### `Info(msg string, fields ...log.Field)`
+Log informational messages for progress tracking.
+- **msg**: Info message
+- **fields**: Structured logging fields
+
+##### `Trace(msg string, fields ...log.Field)`
+Log execution order for debugging.
+- **msg**: Trace message
+- **fields**: Structured logging fields
+
+##### `Debug(msg string, fields ...log.Field)`
+Log detailed debugging information.
+- **msg**: Debug message
+- **fields**: Structured logging fields
+
+##### `Verbo(msg string, fields ...log.Field)`
+Log extremely detailed information.
+- **msg**: Verbose message
+- **fields**: Structured logging fields
+
+### BlockBuilder
+
+Interface for application-specific block construction.
+
+```go
+type BlockBuilder interface {
+    BuildBlock(ctx context.Context, metadata ProtocolMetadata) (VerifiedBlock, bool)
+    IncomingBlock(ctx context.Context)
+}
+```
+
+#### Methods
+
+##### `BuildBlock(ctx context.Context, metadata ProtocolMetadata) (VerifiedBlock, bool)`
+Build a new block with transactions.
+- **ctx**: Context for cancellation
+- **metadata**: Protocol metadata for block construction
+- **Returns**: Built block and success flag
+
+##### `IncomingBlock(ctx context.Context)`
+Signal that a block should be built.
+- **ctx**: Context for cancellation
+
+### Storage
+
+Persistent storage for blocks and finalization proofs.
+
+```go
+type Storage interface {
+    Height() uint64
+    Retrieve(seq uint64) (VerifiedBlock, Finalization, bool)
+    Index(ctx context.Context, block VerifiedBlock, certificate Finalization) error
+}
+```
+
+#### Methods
+
+##### `Height() uint64`
+Get the current blockchain height.
+- **Returns**: Current block height
+
+##### `Retrieve(seq uint64) (VerifiedBlock, Finalization, bool)`
+Retrieve block and finalization at sequence number.
+- **seq**: Sequence number to retrieve
+- **Returns**: Block, finalization certificate, and success flag
+
+##### `Index(ctx context.Context, block VerifiedBlock, certificate Finalization) error`
+Store a finalized block.
+- **ctx**: Context for cancellation
+- **block**: Verified block to store
+- **certificate**: Finalization certificate
+- **Returns**: Error if storage fails
+
+### Communication
+
+P2P communication layer for consensus messages.
+
+```go
+type Communication interface {
+    Nodes() []NodeID
+    Send(msg *Message, destination NodeID)
+    Broadcast(msg *Message)
+}
+```
+
+#### Methods
+
+##### `Nodes() []NodeID`
+Get all participating nodes in the epoch.
+- **Returns**: List of node IDs
+
+##### `Send(msg *Message, destination NodeID)`
+Send a message to a specific node.
+- **msg**: Message to send
+- **destination**: Target node ID
+
+##### `Broadcast(msg *Message)`
+Broadcast message to all nodes except self.
+- **msg**: Message to broadcast
+
+### Signer
+
+BLS signature creation interface.
+
+```go
+type Signer interface {
+    Sign(message []byte) ([]byte, error)
+}
+```
+
+#### Methods
+
+##### `Sign(message []byte) ([]byte, error)`
+Create a BLS signature.
+- **message**: Message to sign
+- **Returns**: Signature bytes and error
+
+### SignatureVerifier
+
+BLS signature verification interface.
+
+```go
+type SignatureVerifier interface {
+    Verify(message []byte, signature []byte, signer NodeID) error
+}
+```
+
+#### Methods
+
+##### `Verify(message []byte, signature []byte, signer NodeID) error`
+Verify a BLS signature.
+- **message**: Original message
+- **signature**: Signature to verify
+- **signer**: Node ID of signer
+- **Returns**: Error if verification fails
+
+### SignatureAggregator
+
+Aggregate BLS signatures into quorum certificates.
+
+```go
+type SignatureAggregator interface {
+    Aggregate([]Signature) (QuorumCertificate, error)
+}
+```
+
+#### Methods
+
+##### `Aggregate([]Signature) (QuorumCertificate, error)`
+Create a quorum certificate from signatures.
+- **signatures**: Array of signatures to aggregate
+- **Returns**: Quorum certificate and error
+
+### WriteAheadLog
+
+Optional WAL for crash recovery.
+
+```go
+type WriteAheadLog interface {
+    Append([]byte) error
+    ReadAll() ([][]byte, error)
+}
+```
+
+#### Methods
+
+##### `Append([]byte) error`
+Append a record to the WAL.
+- **record**: Record bytes to append
+- **Returns**: Error if write fails
+
+##### `ReadAll() ([][]byte, error)`
+Read all records from the WAL.
+- **Returns**: Array of record bytes and error
+
+## Block Interfaces
+
+### Block
+
+Unverified block interface.
+
+```go
+type Block interface {
+    BlockHeader() BlockHeader
+    Verify(ctx context.Context) (VerifiedBlock, error)
+}
+```
+
+#### Methods
+
+##### `BlockHeader() BlockHeader`
+Get the block header.
+- **Returns**: Block header
+
+##### `Verify(ctx context.Context) (VerifiedBlock, error)`
+Verify block by executing on ancestor.
+- **ctx**: Context for cancellation
+- **Returns**: Verified block and error
+
+### VerifiedBlock
+
+Verified block interface.
+
+```go
+type VerifiedBlock interface {
+    BlockHeader() BlockHeader
+    Bytes() ([]byte, error)
+}
+```
+
+#### Methods
+
+##### `BlockHeader() BlockHeader`
+Get the block header.
+- **Returns**: Block header
+
+##### `Bytes() ([]byte, error)`
+Serialize block to bytes.
+- **Returns**: Block bytes and error
+
+### BlockDeserializer
+
+Deserialize blocks from bytes.
+
+```go
+type BlockDeserializer interface {
+    DeserializeBlock(ctx context.Context, bytes []byte) (Block, error)
+}
+```
+
+#### Methods
+
+##### `DeserializeBlock(ctx context.Context, bytes []byte) (Block, error)`
+Parse bytes into a block.
+- **ctx**: Context for cancellation
+- **bytes**: Serialized block bytes
+- **Returns**: Block and error
+
+## Signature Interfaces
+
+### QuorumCertificate
+
+Aggregated BLS signature proving quorum agreement.
+
+```go
+type QuorumCertificate interface {
+    // Implementation-specific methods
+}
+```
+
+### QCDeserializer
+
+Deserialize quorum certificates.
+
+```go
+type QCDeserializer interface {
+    DeserializeQuorumCertificate(bytes []byte) (QuorumCertificate, error)
+}
+```
+
+#### Methods
+
+##### `DeserializeQuorumCertificate(bytes []byte) (QuorumCertificate, error)`
+Parse bytes into a quorum certificate.
+- **bytes**: Serialized QC bytes
+- **Returns**: Quorum certificate and error
+
+## Core Types
+
+### NodeID
+
+Unique identifier for a consensus node.
+
+```go
+type NodeID []byte
+```
+
+#### Methods
+
+##### `String() string`
+String representation of node ID.
+
+##### `Equals(other NodeID) bool`
+Check equality with another node ID.
+
+### BlockHeader
+
+Succinct block representation.
+
+```go
+type BlockHeader struct {
+    Round     uint64
+    Author    NodeID
+    Parent    BlockHeader
+    Timestamp int64
+}
+```
+
+#### Fields
+
+- **Round**: Consensus round number
+- **Author**: Block proposer node ID
+- **Parent**: Parent block header
+- **Timestamp**: Block creation timestamp
+
+### Signature
+
+Individual signature with signer identification.
+
+```go
+type Signature struct {
+    Signer NodeID
+    Value  []byte
+}
+```
+
+#### Fields
+
+- **Signer**: Node ID of signature creator
+- **Value**: Signature bytes
+
+### Message
+
+Consensus protocol message.
+
+```go
+type Message struct {
+    BlockMessage      *BlockMessage
+    VoteMessage       *VoteMessage
+    EmptyVoteMessage  *EmptyVoteMessage
+    FinalizeMessage   *FinalizeMessage
+    ReplicationRequest *ReplicationRequest
+    ReplicationResponse *ReplicationResponse
+}
+```
+
+#### Message Types
+
+##### BlockMessage
+Contains a proposed block.
+
+##### VoteMessage
+Contains a notarization vote.
+
+##### EmptyVoteMessage
+Timeout vote for liveness.
+
+##### FinalizeMessage
+Contains a finalization vote.
+
+##### ReplicationRequest
+Request for missing blocks.
+
+##### ReplicationResponse
+Response with requested blocks.
+
+## Epoch Management
+
+### Epoch
+
+Main consensus coordinator.
+
+```go
+type Epoch struct {
+    // Private fields
+}
+```
+
+#### Methods
+
+##### `NewEpoch(conf EpochConfig) (*Epoch, error)`
+Create a new epoch instance.
+- **conf**: Epoch configuration
+- **Returns**: Epoch instance and error
+
+##### `Start(ctx context.Context) error`
+Start the consensus epoch.
+- **ctx**: Context for lifecycle
+- **Returns**: Error if start fails
+
+##### `Stop() error`
+Stop the consensus epoch.
+- **Returns**: Error if stop fails
+
+##### `AdvanceTime(t time.Time)`
+Notify epoch of time advancement.
+- **t**: Current time
+
+##### `HandleMessage(msg *Message, from NodeID) error`
+Process incoming consensus message.
+- **msg**: Received message
+- **from**: Sender node ID
+- **Returns**: Error if processing fails
+
+##### `GetRound() uint64`
+Get current consensus round.
+- **Returns**: Current round number
+
+##### `GetLastBlock() *VerifiedFinalizedBlock`
+Get latest finalized block.
+- **Returns**: Last finalized block
+
+## Blacklist System
+
+### Blacklist
+
+Track suspected Byzantine nodes.
+
+```go
+type Blacklist struct {
+    NodeCount      uint16
+    SuspectedNodes SuspectedNodes
+    Updates        BlacklistUpdates
+}
+```
+
+#### Functions
+
+##### `Orbit(round uint64, nodeIndex uint16, nodeCount uint16) uint64`
+Calculate orbit for leader selection.
+- **round**: Current round
+- **nodeIndex**: Node index in validator set
+- **nodeCount**: Total validator count
+- **Returns**: Orbit count
+
+### SuspectedNodes
+
+Map of suspected nodes by orbit.
+
+```go
+type SuspectedNodes map[uint16]uint64
+```
+
+### BlacklistUpdate
+
+Update to blacklist state.
+
+```go
+type BlacklistUpdate struct {
+    NodeIndex uint16
+    Type      UpdateType // Suspect or Redeem
+}
+```
+
+## Timeout Handling
+
+### TimeoutHandler
+
+Manage timeout-based tasks.
+
+```go
+type TimeoutHandler struct {
+    // Private fields
+}
+```
+
+#### Methods
+
+##### `NewTimeoutHandler(log Logger, startTime time.Time, nodes []NodeID) *TimeoutHandler`
+Create timeout handler.
+- **log**: Logger instance
+- **startTime**: Initial time
+- **nodes**: List of nodes
+- **Returns**: Handler instance
+
+##### `RegisterTask(task *TimeoutTask)`
+Register a timeout task.
+- **task**: Task to register
+
+##### `Tick(t time.Time)`
+Process time advancement.
+- **t**: Current time
+
+### TimeoutTask
+
+Scheduled timeout task.
+
+```go
+type TimeoutTask struct {
+    NodeID   NodeID
+    TaskID   string
+    Task     func()
+    Deadline time.Time
+    Start    uint64  // For replication
+    End      uint64  // For replication
+}
+```
+
+## Replication Protocol
+
+### ReplicationState
+
+Track block replication state.
+
+```go
+type ReplicationState struct {
+    // Private fields
+}
+```
+
+#### Methods
+
+##### `RequestBlocks(start, end uint64, from NodeID)`
+Request missing blocks from peer.
+- **start**: Starting block number
+- **end**: Ending block number
+- **from**: Target node
+
+##### `HandleResponse(blocks []VerifiedBlock)`
+Process received blocks.
+- **blocks**: Received blocks
+
+## Protocol Metadata
+
+### ProtocolMetadata
+
+Metadata for block construction.
+
+```go
+type ProtocolMetadata struct {
+    Round       uint64
+    ParentBlock BlockHeader
+    Timestamp   time.Time
+}
+```
+
+#### Fields
+
+- **Round**: Current consensus round
+- **ParentBlock**: Parent block header
+- **Timestamp**: Suggested timestamp
+
+## Error Types
+
+Common errors returned by the API:
+
+```go
+var (
+    ErrNotLeader        = errors.New("not the leader")
+    ErrInvalidSignature = errors.New("invalid signature")
+    ErrInvalidBlock     = errors.New("invalid block")
+    ErrTimeout          = errors.New("operation timed out")
+    ErrNotBootstrapped  = errors.New("node not bootstrapped")
+)
+```
+
+## Usage Examples
+
+### Creating an Epoch
+
+```go
+config := EpochConfig{
+    ID:                 NodeID("node-1"),
+    Epoch:              1,
+    StartTime:          time.Now(),
+    MaxProposalWait:    10 * time.Second,
+    MaxRebroadcastWait: 30 * time.Second,
+    Logger:             logger,
+    Signer:             signer,
+    Verifier:           verifier,
+    // ... other components
+}
+
+epoch, err := NewEpoch(config)
+if err != nil {
+    log.Fatal("Failed to create epoch", err)
+}
+
+ctx := context.Background()
+if err := epoch.Start(ctx); err != nil {
+    log.Fatal("Failed to start epoch", err)
+}
+```
+
+### Implementing BlockBuilder
+
+```go
+type MyBlockBuilder struct {
+    txPool *TransactionPool
+}
+
+func (b *MyBlockBuilder) BuildBlock(
+    ctx context.Context,
+    metadata ProtocolMetadata,
+) (VerifiedBlock, bool) {
+    select {
+    case <-ctx.Done():
+        return nil, false
+    case txs := <-b.txPool.Ready():
+        block := createBlock(txs, metadata)
+        return block, true
+    }
+}
+
+func (b *MyBlockBuilder) IncomingBlock(ctx context.Context) {
+    select {
+    case <-ctx.Done():
+        return
+    case <-b.txPool.Signal():
+        return
+    }
+}
+```
+
+### Implementing Storage
+
+```go
+type MyStorage struct {
+    db     *badger.DB
+    height uint64
+    mu     sync.RWMutex
+}
+
+func (s *MyStorage) Height() uint64 {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    return s.height
+}
+
+func (s *MyStorage) Retrieve(seq uint64) (VerifiedBlock, Finalization, bool) {
+    key := fmt.Sprintf("block:%d", seq)
+    // Retrieve from database
+    // ...
+}
+
+func (s *MyStorage) Index(
+    ctx context.Context,
+    block VerifiedBlock,
+    certificate Finalization,
+) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    // Store block and certificate
+    // Update height
+    s.height = block.BlockHeader().Round
+    return nil
+}
+```
+
+### Message Handling
+
+```go
+func handleConsensusMessage(epoch *Epoch, msg *Message, from NodeID) {
+    if err := epoch.HandleMessage(msg, from); err != nil {
+        log.Error("Failed to handle message",
+            log.Err(err),
+            log.Stringer("from", from))
+    }
+}
+```
+
+## Thread Safety
+
+All public methods on the following types are thread-safe:
+- `Epoch`
+- `TimeoutHandler`
+- `ReplicationState`
+
+The following interfaces must be implemented thread-safely:
+- `Storage`
+- `Communication`
+- `WriteAheadLog`
+
+## Performance Considerations
+
+### Signature Verification
+- Batch verify signatures when possible
+- Cache verification results
+- Use parallel verification for large sets
+
+### Storage Operations
+- Batch writes for efficiency
+- Use async indexing where appropriate
+- Implement proper caching layers
+
+### Network Communication
+- Batch messages to reduce syscalls
+- Implement proper flow control
+- Use compression for large messages
+
+## Migration and Compatibility
+
+### Version Compatibility
+- Protocol messages are versioned
+- Backward compatibility for one major version
+- Forward compatibility via unknown field handling
+
+### Storage Migration
+- Blocks are immutable once finalized
+- Migration tools provided for storage backend changes
+- WAL format is stable across versions
+
+## Next Steps
+
+- [Configuration Reference](/docs/configuration) - Detailed configuration options
+- [Advanced Topics](/docs/advanced) - Deep dive into advanced features
+- [Integration Guide](/docs/integration) - Step-by-step integration

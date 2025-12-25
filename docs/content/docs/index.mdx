@@ -1,0 +1,180 @@
+---
+title: Introduction
+description: Byzantine Fault Tolerant consensus implementation using the Simplex protocol
+---
+
+# BFT Consensus
+
+A production-ready Byzantine Fault Tolerant (BFT) consensus implementation for the Lux blockchain, based on the Simplex protocol.
+
+## Features
+
+- **Epoch-based Consensus**: Validator rotation and reconfiguration
+- **Quorum Certificates (QC)**: Cryptographic proof of validator agreement
+- **Leader Rotation**: Round-robin block proposal mechanism
+- **Notarization & Finalization**: Two-phase commit protocol
+- **Empty Vote Mechanism**: Timeout handling for liveness
+- **Blacklist System**: Orbital suspicion tracking for Byzantine nodes
+- **WAL Support**: Write-ahead logging for crash recovery
+- **BLS Signatures**: Efficient signature aggregation
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+    
+    "github.com/luxfi/bft"
+    "github.com/luxfi/log"
+)
+
+func main() {
+    // Configure epoch parameters
+    config := bft.EpochConfig{
+        ID: myNodeID,
+        EpochNumber: 1,
+        StartTime: time.Now(),
+        MaxProposalWait: 10 * time.Second,
+        MaxRebroadcastWait: 30 * time.Second,
+    }
+    
+    // Create new epoch
+    epoch := bft.NewEpoch(
+        config,
+        logger,
+        blockBuilder,
+        storage,
+        communication,
+        signer,
+        verifier,
+        aggregator,
+    )
+    
+    // Start consensus
+    ctx := context.Background()
+    epoch.Start(ctx)
+}
+```
+
+## Architecture
+
+### Core Components
+
+1. **Epoch** (`epoch.go`): Main consensus coordinator managing rounds, votes, and state transitions
+2. **Notarization** (`notarization.go`): Vote collection and QC aggregation
+3. **Replication** (`replication.go`): Block synchronization and retrieval
+4. **Monitor** (`monitor.go`): Asynchronous task scheduling and timeouts
+5. **Scheduler** (`sched.go`): Dependency-based task execution
+6. **Blacklist** (`blacklist.go`): Byzantine node detection using orbits
+7. **Timeout Handler** (`timeout_handler.go`): Progress monitoring and round advancement
+
+### Consensus Flow
+
+```
+┌─────────────────┐
+│  Block Proposal │  ← Leader proposes block
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Notarization   │  ← Validators vote on block
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Finalization   │  ← Validators vote on notarized block
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Block Accept   │  ← Block is finalized and accepted
+└─────────────────┘
+```
+
+## Attribution
+
+The Simplex protocol was originally developed as research and published in the academic literature:
+
+- **Research Paper**: [Simplex: Byzantine Consensus from Random Linear Codes](https://eprint.iacr.org/2023/463) (TCC 2023)
+- **Implementation**: Adapted for use in the Lux blockchain ecosystem
+- **LuxSDK**: For building blockchain VMs with BFT consensus, see [LuxSDK](https://github.com/luxfi/sdk)
+
+## Integration
+
+### With LuxSDK
+
+For production use, the recommended integration path is through [LuxSDK](https://github.com/luxfi/sdk), which provides a complete framework for building blockchain VMs with BFT consensus support for:
+
+- **Lux mainnet** and **testnet** deployments
+- **Sovereign quantum-safe L1 chains** (secured by Quasar Protocol / Lux Quantum Consensus)
+
+### Deployment Types
+
+```go
+// Mainnet deployment (production settings)
+config := &BFTConfig{
+    DeploymentType: MainnetDeployment,
+    MaxProposalWait: 10 * time.Second,
+    BLSAggregation: true,
+}
+
+// Testnet deployment (faster timeouts)
+config := &BFTConfig{
+    DeploymentType: TestnetDeployment,
+    MaxProposalWait: 5 * time.Second,
+}
+
+// Sovereign L1 with quantum-safe mode (Quasar Protocol)
+config := &BFTConfig{
+    DeploymentType: SovereignL1Deployment,
+    QuantumSafeMode: true,
+    ReplicationEnabled: true,
+}
+```
+
+## Interfaces
+
+### Required Implementations
+
+- **Logger**: Structured logging with Fatal/Error/Warn/Info/Trace/Debug/Verbo levels
+- **BlockBuilder**: Application-specific block creation
+- **Storage**: Persistent block and finalization storage
+- **Communication**: P2P message broadcasting and unicast
+- **Signer**: BLS signature creation
+- **SignatureVerifier**: BLS signature validation
+- **SignatureAggregator**: QC generation from individual signatures
+- **WriteAheadLog**: Crash recovery support (optional)
+
+## Testing
+
+```bash
+# Run all tests
+go test -v ./...
+
+# Run specific test patterns
+go test -v -run TestBlacklist
+go test -v -run TestEpoch
+
+# Run with race detector
+go test -race ./...
+
+# Check test coverage
+go test -cover ./...
+```
+
+## Documentation
+
+### Essential Guides
+
+- [**Configuration Reference**](/docs/configuration) - Complete configuration options with examples
+- [**API Reference**](/docs/api) - All interfaces, types, and methods documented
+- [**Advanced Topics**](/docs/advanced) - Blacklist system, WAL, timeout handling, and optimization
+
+### Additional Resources
+
+- [Integration Guide](/docs/integration) - Step-by-step integration with your blockchain
+- [Testing Guide](/docs/testing) - How to test your BFT implementation
+- [Migration Guide](/docs/migration) - Upgrading between versions

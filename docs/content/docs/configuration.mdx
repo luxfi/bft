@@ -1,0 +1,404 @@
+---
+title: Configuration Reference
+description: Complete configuration guide for BFT consensus engine
+---
+
+# Configuration Reference
+
+This page provides a complete reference for all configuration options available in the BFT consensus engine.
+
+## EpochConfig
+
+The main configuration structure for initializing a BFT consensus epoch.
+
+```go
+type EpochConfig struct {
+    // Core configuration
+    ID                  NodeID        // Unique identifier for this node
+    Epoch               uint64        // Current epoch number
+    StartTime           time.Time     // Epoch start time
+
+    // Timing configuration
+    MaxProposalWait     time.Duration // Maximum wait time for block proposals
+    MaxRebroadcastWait  time.Duration // Maximum wait time for message rebroadcast
+
+    // Component interfaces
+    Logger              Logger              // Logging interface
+    Signer              Signer              // BLS signature creation
+    Verifier            SignatureVerifier   // BLS signature validation
+    BlockDeserializer   BlockDeserializer   // Block deserialization
+    QCDeserializer      QCDeserializer      // Quorum certificate deserialization
+    SignatureAggregator SignatureAggregator // Signature aggregation for QCs
+    Comm                Communication       // P2P communication layer
+    Storage             Storage             // Persistent storage
+    WAL                 WriteAheadLog       // Write-ahead logging (optional)
+    BlockBuilder        BlockBuilder        // Application block building
+
+    // Feature flags
+    ReplicationEnabled  bool // Enable block replication protocol
+}
+```
+
+## Configuration Options
+
+### Node Identity
+
+#### `ID` (NodeID)
+- **Required**: Yes
+- **Description**: Unique identifier for this node in the network
+- **Example**: `NodeID("node-1")`
+
+#### `Epoch` (uint64)
+- **Required**: Yes
+- **Description**: Current epoch number for validator rotation
+- **Default**: `1`
+- **Range**: `1` to `uint64` max
+
+### Timing Parameters
+
+#### `StartTime` (time.Time)
+- **Required**: Yes
+- **Description**: Start time of the current epoch
+- **Example**: `time.Now()`
+
+#### `MaxProposalWait` (time.Duration)
+- **Required**: Yes
+- **Description**: Maximum time to wait for block proposals before timeout
+- **Recommended**:
+  - Mainnet: `10 * time.Second`
+  - Testnet: `5 * time.Second`
+  - Local: `2 * time.Second`
+
+#### `MaxRebroadcastWait` (time.Duration)
+- **Required**: Yes
+- **Description**: Maximum time to wait before rebroadcasting messages
+- **Recommended**:
+  - Mainnet: `30 * time.Second`
+  - Testnet: `15 * time.Second`
+  - Local: `5 * time.Second`
+
+### Feature Flags
+
+#### `ReplicationEnabled` (bool)
+- **Required**: No
+- **Default**: `false`
+- **Description**: Enables block replication protocol for faster sync
+- **Impact**: When enabled, nodes actively request missing blocks
+
+## Component Interfaces
+
+### Logger
+
+The logging interface must implement all standard log levels:
+
+```go
+type Logger interface {
+    Fatal(msg string, fields ...log.Field)
+    Error(msg string, fields ...log.Field)
+    Warn(msg string, fields ...log.Field)
+    Info(msg string, fields ...log.Field)
+    Trace(msg string, fields ...log.Field)
+    Debug(msg string, fields ...log.Field)
+    Verbo(msg string, fields ...log.Field)
+}
+```
+
+**Configuration Example**:
+```go
+logger := log.NewDefaultLogger("bft", log.Info)
+```
+
+### Storage
+
+Persistent storage for blocks and finalization proofs:
+
+```go
+type Storage interface {
+    Height() uint64
+    Retrieve(seq uint64) (VerifiedBlock, Finalization, bool)
+    Index(ctx context.Context, block VerifiedBlock, certificate Finalization) error
+}
+```
+
+**Configuration Tips**:
+- Use BadgerDB for production deployments
+- Use in-memory storage for testing
+- Ensure sufficient disk space for block history
+
+### Communication
+
+Network communication layer for message passing:
+
+```go
+type Communication interface {
+    Nodes() []NodeID
+    Send(msg *Message, destination NodeID)
+    Broadcast(msg *Message)
+}
+```
+
+**Configuration Considerations**:
+- Configure appropriate message buffer sizes
+- Set network timeouts based on deployment environment
+- Enable compression for cross-datacenter deployments
+
+### BlockBuilder
+
+Application-specific block construction:
+
+```go
+type BlockBuilder interface {
+    BuildBlock(ctx context.Context, metadata ProtocolMetadata) (VerifiedBlock, bool)
+    IncomingBlock(ctx context.Context)
+}
+```
+
+**Configuration Tips**:
+- Set appropriate block size limits
+- Configure transaction batching parameters
+- Implement proper context cancellation
+
+### WriteAheadLog (Optional)
+
+WAL for crash recovery:
+
+```go
+type WriteAheadLog interface {
+    Append([]byte) error
+    ReadAll() ([][]byte, error)
+}
+```
+
+**Configuration**:
+- **Required**: No (but recommended for production)
+- **Path**: Configure WAL directory with sufficient space
+- **Sync Policy**: Use fsync for durability
+
+## Deployment Configurations
+
+### Mainnet Configuration
+
+```go
+config := EpochConfig{
+    ID:                  myNodeID,
+    Epoch:               currentEpoch,
+    StartTime:           epochStartTime,
+    MaxProposalWait:     10 * time.Second,
+    MaxRebroadcastWait:  30 * time.Second,
+    ReplicationEnabled:  true,
+    // ... other components
+}
+```
+
+### Testnet Configuration
+
+```go
+config := EpochConfig{
+    ID:                  myNodeID,
+    Epoch:               currentEpoch,
+    StartTime:           epochStartTime,
+    MaxProposalWait:     5 * time.Second,
+    MaxRebroadcastWait:  15 * time.Second,
+    ReplicationEnabled:  true,
+    // ... other components
+}
+```
+
+### Local Development
+
+```go
+config := EpochConfig{
+    ID:                  NodeID("local-node"),
+    Epoch:               1,
+    StartTime:           time.Now(),
+    MaxProposalWait:     2 * time.Second,
+    MaxRebroadcastWait:  5 * time.Second,
+    ReplicationEnabled:  false,
+    // ... other components
+}
+```
+
+## Advanced Configuration
+
+### Blacklist System
+
+The blacklist system uses orbital tracking to detect Byzantine nodes:
+
+- **Orbit Calculation**: Tracks leader selection frequency
+- **Suspicion Threshold**: Configure based on network size
+- **Redemption Period**: Time before suspected nodes are cleared
+
+### Timeout Handler
+
+Configure timeout handling for liveness:
+
+- **Empty Vote Timeout**: Time before sending empty votes
+- **Replication Timeout**: Time before requesting missing blocks
+- **Progress Timeout**: Time before escalating to next round
+
+### Monitor Configuration
+
+The monitor handles asynchronous task scheduling:
+
+- **Task Queue Size**: Configure based on expected load
+- **Worker Pool Size**: Number of concurrent task workers
+- **Retry Policy**: Configure exponential backoff parameters
+
+## Environment Variables
+
+The BFT engine respects the following environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BFT_LOG_LEVEL` | Logging verbosity | `info` |
+| `BFT_WAL_DIR` | WAL directory path | `./wal` |
+| `BFT_MAX_ROUNDS` | Maximum rounds to cache | `100` |
+| `BFT_REPLICATION` | Enable replication | `false` |
+
+## Performance Tuning
+
+### Memory Configuration
+
+- **Round Cache Size**: Number of rounds to keep in memory
+- **Message Buffer Size**: Size of message queues
+- **Signature Cache Size**: Number of cached signature verifications
+
+### Network Optimization
+
+- **Message Batching**: Batch multiple messages for efficiency
+- **Compression**: Enable for WAN deployments
+- **Connection Pool Size**: Based on number of validators
+
+### Storage Optimization
+
+- **Block Pruning**: Configure retention period
+- **Index Cache Size**: Size of block index cache
+- **WAL Rotation**: Configure WAL file rotation policy
+
+## Security Configuration
+
+### BLS Signature Configuration
+
+- **Key Size**: Use 256-bit keys minimum
+- **Aggregation Threshold**: Quorum size for valid QCs
+- **Verification Parallelism**: Number of parallel signature verifications
+
+### Network Security
+
+- **TLS Configuration**: Required for production
+- **Rate Limiting**: Configure message rate limits
+- **Peer Authentication**: Validator key verification
+
+## Monitoring and Observability
+
+### Metrics Configuration
+
+- **Metrics Endpoint**: Configure Prometheus endpoint
+- **Metric Granularity**: Choose appropriate histogram buckets
+- **Export Interval**: Metric scrape interval
+
+### Logging Configuration
+
+- **Log Rotation**: Configure log file rotation
+- **Log Format**: JSON or text format
+- **Log Sampling**: Configure sampling for high-volume logs
+
+## Migration Guide
+
+### From v0.1.1 to v0.1.2
+
+No configuration changes required. Internal improvements only.
+
+### From v0.1.0 to v0.1.1
+
+- Logger interface changed from zap to luxfi/log
+- Update logger initialization code
+
+## Best Practices
+
+1. **Always configure WAL** for production deployments
+2. **Set appropriate timeouts** based on network latency
+3. **Enable replication** for faster sync
+4. **Monitor resource usage** and adjust cache sizes
+5. **Use separate WAL and data directories** on different disks
+6. **Configure log rotation** to prevent disk exhaustion
+7. **Test configuration changes** in staging first
+
+## Troubleshooting
+
+### Common Configuration Issues
+
+#### Issue: Slow block finalization
+- **Solution**: Reduce `MaxProposalWait` timeout
+- **Check**: Network latency between validators
+
+#### Issue: High memory usage
+- **Solution**: Reduce round cache size
+- **Check**: Message buffer sizes
+
+#### Issue: WAL corruption
+- **Solution**: Enable fsync for durability
+- **Check**: Disk space and I/O errors
+
+#### Issue: Network partition
+- **Solution**: Increase `MaxRebroadcastWait`
+- **Check**: Network connectivity between nodes
+
+## Configuration Validation
+
+The BFT engine validates configuration at startup:
+
+1. All required interfaces must be non-nil
+2. Timeouts must be positive durations
+3. Epoch number must be greater than 0
+4. Node ID must be in the validator set
+
+## Example: Full Configuration
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+
+    "github.com/luxfi/bft"
+    "github.com/luxfi/log"
+)
+
+func createConfig() bft.EpochConfig {
+    logger := log.NewDefaultLogger("bft", log.Info)
+
+    return bft.EpochConfig{
+        // Identity
+        ID:     NodeID("validator-1"),
+        Epoch:  1,
+        StartTime: time.Now(),
+
+        // Timeouts
+        MaxProposalWait:    10 * time.Second,
+        MaxRebroadcastWait: 30 * time.Second,
+
+        // Components
+        Logger:              logger,
+        Signer:              blsSigner,
+        Verifier:            blsVerifier,
+        BlockDeserializer:   blockDeserializer,
+        QCDeserializer:      qcDeserializer,
+        SignatureAggregator: sigAggregator,
+        Comm:                p2pNetwork,
+        Storage:             badgerStorage,
+        WAL:                 walStorage,
+        BlockBuilder:        appBlockBuilder,
+
+        // Features
+        ReplicationEnabled: true,
+    }
+}
+```
+
+## Next Steps
+
+- [API Reference](/docs/api) - Complete API documentation
+- [Advanced Topics](/docs/advanced) - Blacklist, WAL, and timeout handling
+- [Integration Guide](/docs/integration) - Step-by-step integration
