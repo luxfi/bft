@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 type TimeoutTask struct {
@@ -99,7 +99,7 @@ func (t *TimeoutHandler) maybeRunTasks() {
 		heap.Pop(&t.heap)
 		delete(t.tasks[string(next.NodeID)], next.TaskID)
 		t.lock.Unlock()
-		t.log.Debug("Executing timeout task", zap.String("taskid", next.TaskID))
+		t.log.Debug("Executing timeout task", log.String("taskid", next.TaskID))
 		next.Task()
 	}
 }
@@ -129,18 +129,18 @@ func (t *TimeoutHandler) AddTask(task *TimeoutTask) {
 	defer t.lock.Unlock()
 
 	if _, ok := t.tasks[string(task.NodeID)]; !ok {
-		t.log.Debug("Attempting to add a task for an unknown node", zap.Stringer("from", task.NodeID))
+		t.log.Debug("Attempting to add a task for an unknown node", log.Stringer("from", task.NodeID))
 		return
 	}
 
 	// adds a task to the heap and the tasks map
 	if _, ok := t.tasks[string(task.NodeID)][task.TaskID]; ok {
-		t.log.Debug("Trying to add an already included task", zap.Stringer("from", task.NodeID), zap.String("Task ID", task.TaskID))
+		t.log.Debug("Trying to add an already included task", log.Stringer("from", task.NodeID), log.String("Task ID", task.TaskID))
 		return
 	}
 
 	t.tasks[string(task.NodeID)][task.TaskID] = task
-	t.log.Debug("Adding timeout task", zap.Stringer("from", task.NodeID), zap.String("taskid", task.TaskID))
+	t.log.Debug("Adding timeout task", log.Stringer("from", task.NodeID), log.String("taskid", task.TaskID))
 	heap.Push(&t.heap, task)
 }
 
@@ -149,7 +149,7 @@ func (t *TimeoutHandler) RemoveTask(nodeID NodeID, ID string) {
 	defer t.lock.Unlock()
 
 	if _, ok := t.tasks[string(nodeID)]; !ok {
-		t.log.Debug("Attempting to remove a task for an unknown node", zap.Stringer("from", nodeID))
+		t.log.Debug("Attempting to remove a task for an unknown node", log.Stringer("from", nodeID))
 		return
 	}
 
@@ -159,7 +159,7 @@ func (t *TimeoutHandler) RemoveTask(nodeID NodeID, ID string) {
 
 	// find the task using the task map
 	// remove it from the heap using the index
-	t.log.Debug("Removing timeout task", zap.Stringer("from", nodeID), zap.String("taskid", ID))
+	t.log.Debug("Removing timeout task", log.Stringer("from", nodeID), log.String("taskid", ID))
 	heap.Remove(&t.heap, t.tasks[string(nodeID)][ID].index)
 	delete(t.tasks[string(nodeID)], ID)
 }

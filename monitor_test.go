@@ -4,13 +4,14 @@
 package bft
 
 import (
+	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+
+	"github.com/luxfi/log"
 )
 
 func TestMonitorDoubleClose(t *testing.T) {
@@ -28,20 +29,20 @@ func TestMonitorPrematureCancelTask(t *testing.T) {
 
 	ticked := make(chan struct{})
 
-	mon := NewMonitor(start, makeLogger(t))
-	mon.logger.(*testLogger).intercept(func(entry zapcore.Entry) error {
-		if entry.Message == "Ticked" {
+	logger := makeLogger(t)
+	mon := NewMonitor(start, logger)
+	logger.intercept(func(msg string) {
+		if msg == "Ticked" {
 			ticked <- struct{}{}
 		}
-		return nil
 	})
 
 	t.Run("Cancelled future task does not fire", func(t *testing.T) {
-		panic := func() {
+		panicFn := func() {
 			panic("test failed")
 		}
 
-		mon.FutureTask(time.Hour, panic)
+		mon.FutureTask(time.Hour, panicFn)
 		mon.CancelFutureTask()
 
 		mon.AdvanceTime(start.Add(time.Hour))
@@ -116,25 +117,107 @@ func TestMonitorAsyncWaitForWithNestedWaitUntil(t *testing.T) {
 	wg.Wait()
 }
 
+// testLogger wraps log.Logger with intercept capability for testing
 type testLogger struct {
-	*zap.Logger
+	log.Logger
+	hook func(msg string)
 }
 
-func (tl *testLogger) Trace(msg string, fields ...zap.Field) {
-	tl.Log(zapcore.DebugLevel, msg, fields...)
+func (tl *testLogger) intercept(hook func(msg string)) {
+	tl.hook = hook
 }
 
-func (tl *testLogger) Verbo(msg string, fields ...zap.Field) {
-	tl.Log(zapcore.DebugLevel, msg, fields...)
+func (tl *testLogger) Trace(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Trace(msg, ctx...)
 }
 
-func (t *testLogger) intercept(hook func(entry zapcore.Entry) error) {
-	logger := t.Logger.WithOptions(zap.Hooks(hook))
-	t.Logger = logger
+func (tl *testLogger) Verbo(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Debug(msg, ctx...)
+}
+
+func (tl *testLogger) Debug(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Debug(msg, ctx...)
+}
+
+func (tl *testLogger) Info(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Info(msg, ctx...)
+}
+
+func (tl *testLogger) Warn(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Warn(msg, ctx...)
+}
+
+func (tl *testLogger) Error(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Error(msg, ctx...)
+}
+
+func (tl *testLogger) Fatal(msg string, fields ...log.Field) {
+	if tl.hook != nil {
+		tl.hook(msg)
+	}
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Fatal(msg, ctx...)
 }
 
 func makeLogger(t *testing.T) *testLogger {
-	logger, err := zap.NewDevelopment()
-	require.NoError(t, err)
+	w := &testWriter{t: t}
+	logger := log.NewWriter(w).With().Str("test", t.Name()).Logger()
 	return &testLogger{Logger: logger}
 }
+
+type testWriter struct {
+	t *testing.T
+}
+
+func (tw *testWriter) Write(p []byte) (n int, err error) {
+	tw.t.Log(string(p))
+	return len(p), nil
+}
+
+// Ensure testWriter implements io.Writer
+var _ io.Writer = (*testWriter)(nil)

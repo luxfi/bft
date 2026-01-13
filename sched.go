@@ -6,7 +6,7 @@ package bft
 import (
 	"sync"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 type scheduler struct {
@@ -93,7 +93,7 @@ func (as *scheduler) run() {
 		if len(as.ready) == 0 { // (1)
 			as.logger.Trace("No ready tasks, going to sleep")
 			as.signal.Wait() // (2)
-			as.logger.Trace("Woken up from sleep", zap.Int("ready tasks", len(as.ready)))
+			as.logger.Trace("Woken up from sleep", log.Int("ready tasks", len(as.ready)))
 			continue // (3)
 		}
 
@@ -103,14 +103,14 @@ func (as *scheduler) run() {
 		numReadyTasks := len(as.ready)
 
 		as.lock.Unlock() // (5)
-		as.logger.Debug("Running task", zap.Int("remaining ready tasks", numReadyTasks))
+		as.logger.Debug("Running task", log.Int("remaining ready tasks", numReadyTasks))
 		id := taskToRun.f() // (6)
-		as.logger.Debug("Task finished execution", zap.Stringer("taskID", id))
+		as.logger.Debug("Task finished execution", log.Stringer("taskID", id))
 		as.lock.Lock()
 
 		newlyReadyTasks := as.pending.Remove(id)        // (7)
 		as.ready = append(as.ready, newlyReadyTasks...) // (8)
-		as.logger.Trace("Enqueued newly ready tasks", zap.Int("number of ready tasks", len(newlyReadyTasks)))
+		as.logger.Trace("Enqueued newly ready tasks", log.Int("number of ready tasks", len(newlyReadyTasks)))
 	}
 }
 
@@ -128,12 +128,12 @@ func (as *scheduler) Schedule(f func() Digest, prev Digest, ready bool) {
 	}
 
 	if !ready {
-		as.logger.Debug("Scheduling task", zap.Stringer("dependency", prev))
+		as.logger.Debug("Scheduling task", log.Stringer("dependency", prev))
 		as.pending.Insert(task) // (9)
 		return
 	}
 
-	as.logger.Debug("Scheduling new ready task", zap.Stringer("dependency", prev))
+	as.logger.Debug("Scheduling new ready task", log.Stringer("dependency", prev))
 
 	as.ready = append(as.ready, task) // (10)
 

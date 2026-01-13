@@ -24,7 +24,6 @@ import (
 	"github.com/luxfi/bft/wal"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestEpochHandleNotarizationFutureRound(t *testing.T) {
@@ -741,7 +740,7 @@ func TestEpochBlockSentTwice(t *testing.T) {
 
 	var tooFarMsg, alreadyReceivedMsg bool
 
-	l.Intercept(func(entry zapcore.Entry) error {
+	l.Intercept(func(entry testutil.LogEntry) {
 		if entry.Message == "Got block of a future round" {
 			tooFarMsg = true
 		}
@@ -749,8 +748,6 @@ func TestEpochBlockSentTwice(t *testing.T) {
 		if entry.Message == "Already received a proposal from this node for the round" {
 			alreadyReceivedMsg = true
 		}
-
-		return nil
 	})
 
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
@@ -853,13 +850,12 @@ func TestEpochQCSignedByNonExistentNodes(t *testing.T) {
 		},
 	}
 
-	l.Intercept(func(entry zapcore.Entry) error {
+	l.Intercept(func(entry testutil.LogEntry) {
 		for key, f := range callbacks {
 			if strings.Contains(entry.Message, key) {
 				f()
 			}
 		}
-		return nil
 	})
 
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
@@ -986,11 +982,10 @@ func TestEpochBlockSentFromNonLeader(t *testing.T) {
 	l := testutil.MakeLogger(t, 1)
 	nonLeaderMessage := false
 
-	l.Intercept(func(entry zapcore.Entry) error {
+	l.Intercept(func(entry testutil.LogEntry) {
 		if entry.Message == "Got block from a block proposer that is not the leader of the round" {
 			nonLeaderMessage = true
 		}
-		return nil
 	})
 
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}
@@ -1042,11 +1037,10 @@ func TestEpochBlockTooHighRound(t *testing.T) {
 
 	var rejectedBlock bool
 
-	l.Intercept(func(entry zapcore.Entry) error {
+	l.Intercept(func(entry testutil.LogEntry) {
 		if entry.Message == "Received a block message for a too high round" {
 			rejectedBlock = true
 		}
-		return nil
 	})
 
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1)}

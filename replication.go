@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 // signedSequence is a sequence that has been signed by a qourum certificate.
@@ -102,7 +102,7 @@ func (r *ReplicationState) collectMissingSequences(observedSignedSeq *signedSequ
 	// Don't exceed the max round window
 	endSeq := math.Min(float64(observedSeq), float64(r.maxRoundWindow+nextSeqToCommit))
 
-	r.logger.Debug("Node is behind, requesting missing finalizations", zap.Uint64("seq", observedSeq), zap.Uint64("startSeq", uint64(startSeq)), zap.Uint64("endSeq", uint64(endSeq)))
+	r.logger.Debug("Node is behind, requesting missing finalizations", log.Uint64("seq", observedSeq), log.Uint64("startSeq", uint64(startSeq)), log.Uint64("endSeq", uint64(endSeq)))
 	r.sendReplicationRequests(uint64(startSeq), uint64(endSeq))
 }
 
@@ -119,7 +119,7 @@ func (r *ReplicationState) sendReplicationRequests(start uint64, end uint64) {
 
 	seqRequests := DistributeSequenceRequests(start, end, numNodes)
 
-	r.logger.Debug("Distributing replication requests", zap.Uint64("start", start), zap.Uint64("end", end), zap.Stringer("nodes", NodeIDs(nodes)))
+	r.logger.Debug("Distributing replication requests", log.Uint64("start", start), log.Uint64("end", end), log.Stringer("nodes", NodeIDs(nodes)))
 	for i, seqs := range seqRequests {
 		index := (i + r.requestIterator) % numNodes
 		r.sendRequestToNode(seqs.Start, seqs.End, nodes, index)
@@ -135,9 +135,9 @@ func (r *ReplicationState) sendReplicationRequests(start uint64, end uint64) {
 // re-send the request.
 func (r *ReplicationState) sendRequestToNode(start uint64, end uint64, nodes []NodeID, index int) {
 	r.logger.Debug("Requesting missing finalizations ",
-		zap.Stringer("from", nodes[index]),
-		zap.Uint64("start", start),
-		zap.Uint64("end", end))
+		log.Stringer("from", nodes[index]),
+		log.Uint64("start", start),
+		log.Uint64("end", end))
 	seqs := make([]uint64, (end+1)-start)
 	for i := start; i <= end; i++ {
 		seqs[i-start] = i
@@ -181,7 +181,7 @@ func (r *ReplicationState) receivedReplicationResponse(data []QuorumRound, node 
 	highestSeq := r.highestSequenceObserved.seq
 	for _, qr := range data {
 		if qr.GetSequence() <= highestSeq && qr.Finalization == nil && qr.Notarization != nil {
-			r.logger.Debug("Received notarization without finalization, skipping", zap.Stringer("from", node), zap.Uint64("seq", qr.GetSequence()))
+			r.logger.Debug("Received notarization without finalization, skipping", log.Stringer("from", node), log.Uint64("seq", qr.GetSequence()))
 			continue
 		}
 
@@ -192,7 +192,7 @@ func (r *ReplicationState) receivedReplicationResponse(data []QuorumRound, node 
 
 	task := FindReplicationTask(r.timeoutHandler, node, seqs)
 	if task == nil {
-		r.logger.Debug("Could not find a timeout task associated with the replication response", zap.Stringer("from", node), zap.Any("seqs", seqs))
+		r.logger.Debug("Could not find a timeout task associated with the replication response", log.Stringer("from", node), log.Any("seqs", seqs))
 		return
 	}
 	r.timeoutHandler.RemoveTask(node, task.TaskID)
@@ -204,7 +204,7 @@ func (r *ReplicationState) receivedReplicationResponse(data []QuorumRound, node 
 	}
 
 	// if not all sequences were returned, create new timeouts
-	r.logger.Debug("Received missing sequences in the replication response", zap.Stringer("from", node), zap.Any("missing", missing))
+	r.logger.Debug("Received missing sequences in the replication response", log.Stringer("from", node), log.Any("missing", missing))
 	nodes := r.highestSequenceObserved.signers.Remove(r.id)
 	numNodes := len(nodes)
 	segments := CompressSequences(missing)
@@ -277,14 +277,14 @@ func (r *ReplicationState) StoreQuorumRound(round QuorumRound) {
 		signedSeq, err := newSignedSequenceFromRound(round)
 		if err != nil {
 			// should never be here since we already checked the QuorumRound was valid
-			r.logger.Error("Error creating signed sequence from round", zap.Error(err))
+			r.logger.Error("Error creating signed sequence from round", log.Err(err))
 			return
 		}
 
 		r.highestSequenceObserved = signedSeq
 	}
 
-	r.logger.Debug("Stored quorum round ", zap.Stringer("qr", &round))
+	r.logger.Debug("Stored quorum round ", log.Stringer("qr", &round))
 	r.receivedQuorumRounds[round.GetRound()] = round
 }
 

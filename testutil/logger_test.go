@@ -1,12 +1,12 @@
-// Copyright (C) 2019-2024, Lux Industries, Inc. All rights reserved.
+// Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package testutil
 
 import (
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zapcore"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSilence(t *testing.T) {
@@ -15,16 +15,14 @@ func TestSilence(t *testing.T) {
 
 	l1.Silence()
 
-	l1.Intercept(func(entry zapcore.Entry) error {
+	l1.Intercept(func(entry LogEntry) {
 		t.Fatal("shouldn't be logged")
-		return nil
 	})
 
 	var c int
 
-	l2.Intercept(func(entry zapcore.Entry) error {
+	l2.Intercept(func(entry LogEntry) {
 		c++
-		return nil
 	})
 
 	l1.Debug("Debug message")

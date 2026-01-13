@@ -11,7 +11,7 @@ import (
 
 	"github.com/luxfi/bft/record"
 
-	"go.uber.org/zap"
+	"github.com/luxfi/log"
 )
 
 var (
@@ -44,11 +44,11 @@ func EmptyNotarizationFromRecord(record []byte, qd QCDeserializer) (EmptyNotariz
 func NewNotarization(logger Logger, signatureAggregator SignatureAggregator, votesForCurrentRound map[string]*Vote, blockHeader BlockHeader) (Notarization, error) {
 	voteCount := len(votesForCurrentRound)
 	signatures := make([]Signature, 0, voteCount)
-	logger.Info("Collected Quorum of votes", zap.Uint64("round", blockHeader.Round), zap.Int("votes", voteCount))
+	logger.Info("Collected Quorum of votes", log.Uint64("round", blockHeader.Round), log.Int("votes", voteCount))
 
 	var toBeSignedVote *ToBeSignedVote
 	for _, vote := range votesForCurrentRound {
-		logger.Debug("Collected vote from node", zap.Stringer("NodeID", vote.Signature.Signer))
+		logger.Debug("Collected vote from node", log.Stringer("NodeID", vote.Signature.Signer))
 		signatures = append(signatures, vote.Signature)
 		if toBeSignedVote == nil {
 			toBeSignedVote = &vote.Vote
@@ -85,7 +85,7 @@ func NewFinalization(logger Logger, signatureAggregator SignatureAggregator, fin
 		if vote.Finalization.Digest != expectedDigest {
 			return Finalization{}, ErrorInvalidFinalizationDigest
 		}
-		logger.Debug("Collected a finalize vote from node", zap.Stringer("NodeID", vote.Signature.Signer), zap.Uint64("round", vote.Finalization.Round))
+		logger.Debug("Collected a finalize vote from node", log.Stringer("NodeID", vote.Signature.Signer), log.Uint64("round", vote.Finalization.Round))
 		signatures = append(signatures, vote.Signature)
 	}
 

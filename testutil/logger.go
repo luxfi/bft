@@ -1,79 +1,154 @@
-// Copyright (C) 2019-2024, Lux Industries, Inc. All rights reserved.
+// Copyright (C) 2019-2025, Lux Industries, Inc. All rights reserved.
 // See the file LICENSE for licensing terms.
 
 package testutil
 
 import (
+	"io"
 	"os"
-	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"github.com/luxfi/log"
 )
 
+// LogEntry represents a captured log entry for testing
+type LogEntry struct {
+	Level   log.Level
+	Message string
+}
+
+// TestLogger wraps log.Logger with test utilities
 type TestLogger struct {
-	*zap.Logger
-	traceVerboseLogger *zap.Logger
+	log.Logger
+	silenced bool
+	hook     func(entry LogEntry)
 }
 
-func (t *TestLogger) Intercept(hook func(entry zapcore.Entry) error) {
-	logger := t.Logger.WithOptions(zap.Hooks(hook))
-	t.Logger = logger
-}
-
+// Silence stops all logging output
 func (t *TestLogger) Silence() {
-	atomicLevel := zap.NewAtomicLevelAt(zapcore.FatalLevel)
-	core := t.Logger.Core()
-	t.Logger = zap.New(core, zap.AddCaller(), zap.IncreaseLevel(atomicLevel))
-	t.traceVerboseLogger = zap.New(core, zap.AddCaller(), zap.IncreaseLevel(atomicLevel))
+	t.silenced = true
+	t.Logger = log.Noop()
 }
 
-func (tl *TestLogger) Trace(msg string, fields ...zap.Field) {
-	tl.traceVerboseLogger.Log(zapcore.DebugLevel, msg, fields...)
+// Intercept sets a hook function that receives all log entries
+func (tl *TestLogger) Intercept(hook func(entry LogEntry)) {
+	tl.hook = hook
 }
 
-func (tl *TestLogger) Verbo(msg string, fields ...zap.Field) {
-	tl.traceVerboseLogger.Log(zapcore.DebugLevel, msg, fields...)
+func (tl *TestLogger) runHook(level log.Level, msg string) {
+	if tl.hook != nil {
+		tl.hook(LogEntry{Level: level, Message: msg})
+	}
 }
 
+func (tl *TestLogger) Trace(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.TraceLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Trace(msg, ctx...)
+}
+
+func (tl *TestLogger) Verbo(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.DebugLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Debug(msg, ctx...)
+}
+
+func (tl *TestLogger) Debug(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.DebugLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Debug(msg, ctx...)
+}
+
+func (tl *TestLogger) Info(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.InfoLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Info(msg, ctx...)
+}
+
+func (tl *TestLogger) Warn(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.WarnLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Warn(msg, ctx...)
+}
+
+func (tl *TestLogger) Error(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.ErrorLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Error(msg, ctx...)
+}
+
+func (tl *TestLogger) Fatal(msg string, fields ...log.Field) {
+	if tl.silenced {
+		return
+	}
+	tl.runHook(log.FatalLevel, msg)
+	ctx := make([]interface{}, len(fields))
+	for i, f := range fields {
+		ctx[i] = f
+	}
+	tl.Logger.Fatal(msg, ctx...)
+}
+
+// MakeLogger creates a TestLogger for testing
 func MakeLogger(t *testing.T, node ...int) *TestLogger {
-	defaultEncoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-	config := defaultEncoderConfig
-	config.EncodeLevel = func(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
-		enc.AppendString(strings.ToUpper(l.String()))
-	}
-	config.EncodeTime = zapcore.TimeEncoderOfLayout("[01-02|15:04:05.000]")
-	config.ConsoleSeparator = " "
-	encoder := zapcore.NewConsoleEncoder(config)
-
-	atomicLevel := zap.NewAtomicLevelAt(zapcore.DebugLevel)
-
-	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), atomicLevel)
-
-	logger := zap.New(core, zap.AddCaller())
-	logger = logger.With(zap.String("test", t.Name()))
-	if len(node) > 0 {
-		logger = logger.With(zap.Int("node", node[0]))
+	var w io.Writer = os.Stdout
+	if t != nil {
+		w = &testWriter{t: t}
 	}
 
-	traceVerboseLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-	traceVerboseLogger = traceVerboseLogger.With(zap.String("test", t.Name()))
+	logger := log.NewWriter(w).With().
+		Str("test", t.Name()).
+		Logger()
 
 	if len(node) > 0 {
-		traceVerboseLogger = traceVerboseLogger.With(zap.Int("node", node[0]))
+		logger = logger.With().Int("node", node[0]).Logger()
 	}
 
-	l := &TestLogger{Logger: logger, traceVerboseLogger: traceVerboseLogger}
+	return &TestLogger{Logger: logger}
+}
 
-	return l
+// testWriter wraps testing.T for log output
+type testWriter struct {
+	t *testing.T
+}
+
+func (tw *testWriter) Write(p []byte) (n int, err error) {
+	tw.t.Log(string(p))
+	return len(p), nil
 }

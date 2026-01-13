@@ -16,7 +16,6 @@ import (
 	. "github.com/luxfi/bft"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zapcore"
 )
 
 // TestEpochLeaderFailoverWithEmptyNotarization ensures leader failover works with
@@ -692,11 +691,10 @@ func TestEpochLeaderFailoverNotNeeded(t *testing.T) {
 	var timedOut atomic.Bool
 
 	l := testutil.MakeLogger(t, 1)
-	l.Intercept(func(entry zapcore.Entry) error {
+	l.Intercept(func(entry testutil.LogEntry) {
 		if entry.Message == `Timed out on block agreement` {
 			timedOut.Store(true)
 		}
-		return nil
 	})
 
 	bb := &testBlockBuilder{out: make(chan *testBlock, 1), blockShouldBeBuilt: make(chan struct{}, 1)}
