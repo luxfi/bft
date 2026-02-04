@@ -406,7 +406,7 @@ type Message struct {
 It is the responsibility of the application to properly handle authentication, marshalling and wire protocol,
 and to construct the `Message` properly.
 
-Compared to the snowman consensus, the BFT API would be at the engine level. 
+Compared to chain consensus, the BFT API would be at the engine level. 
 The reason for that it would be possible to integrate BFT into a toy application for early testing,
 and also in order to be able to structure tests to run an entire network of nodes.
 
