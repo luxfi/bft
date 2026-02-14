@@ -376,7 +376,7 @@ or notarized via empty votes.
 
 ## BFT API
 
-In order for the consensus protocol to be part of an application, such as avalanchego, 
+In order for the consensus protocol to be part of an application, such as luxd, 
 BFT will both depend on APIs from the application, and also give APIs for the application to use it.
 
 Examples of APIs that BFT would expect from the application, 
