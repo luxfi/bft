@@ -1,6 +1,6 @@
 module github.com/luxfi/bft
 
-go 1.26
+go 1.26.1
 
 require (
 	github.com/luxfi/log v1.4.0
