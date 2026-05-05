@@ -1,4 +1,4 @@
-# BFT consensus for Avalanche
+# BFT consensus for Lux
 
 ## Introduction
 
@@ -21,7 +21,7 @@ across different nodes and proposes batches in parallel.
 While the argument is correct, a fast consensus protocol isn't enough to guarantee a high end to end throughput for a blockchain.
 To fully utilize parallel block proposers, the VM should also support distributed transaction processing.
 
-The HyperSDK, Avalanche's "high throughput" VM of choice, 
+The HyperSDK, Lux's "high throughput" VM of choice, 
 [plans to employ](https://hackmd.io/@patrickogrady/rys8mdl5p#Integrating-Vryx-with-the-HyperSDK-High-Level-Sketch) 
 techniques that totally order certificates of transaction chunk availability, which are of small size.
 
