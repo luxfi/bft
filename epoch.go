@@ -517,6 +517,7 @@ func (e *Epoch) loadLastBlock() error {
 
 func (e *Epoch) Stop() {
 	e.finishFn()
+	e.sched.Close()
 }
 
 func (e *Epoch) handleFinalizationMessage(message *Finalization, from NodeID) error {

@@ -163,6 +163,20 @@ func newBFTNode(t *testing.T, nodeID NodeID, net *inMemNetwork, bb BlockBuilder,
 			from NodeID
 		}, 100)}
 
+	// Silence the logger on test cleanup so any in-flight log call from
+	// a background goroutine (scheduler.run, handleMessages,
+	// processFinalizedBlock) becomes a no-op instead of a t.Log-after-
+	// test panic — the flake source for TestReplicationNodeDiverges.
+	// We do NOT call e.Stop or close(ingress) here: both create new
+	// goroutine-join races that introduced deadlocks in earlier
+	// attempts. Silencing the logger is the minimal change that breaks
+	// the panic chain without touching goroutine lifecycle. Proper
+	// goroutine cleanup belongs to the simplex-upstream sync (task #56
+	// — port leak_test.go + scheduler refactor PR #296).
+	t.Cleanup(func() {
+		ti.l.Silence()
+	})
+
 	net.addNode(ti)
 	return ti
 }
