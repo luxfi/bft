@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="bft" width="880"></p>
+
 # BFT consensus for Lux
 
 ## Introduction
